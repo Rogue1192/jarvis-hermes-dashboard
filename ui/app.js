@@ -202,7 +202,7 @@ let convo = false, suppress = false;
 // Wake word. The detector lives in the Python server (browsers suspend audio in
 // background tabs), so the browser's only jobs are: poll for a trigger, and mute
 // the detector while a conversation is live so JARVIS never wakes on his own voice.
-let wakeAvailable = false, idleTurns = 0;
+let wakeAvailable = false, idleTurns = 0, oneShot = false;
 const IDLE_TURNS_BEFORE_SLEEP = 2;
 
 function setWakeMute(on){
@@ -308,8 +308,10 @@ async function micToggle(){
 }
 
 function stopConvo(){
-  convo = false; suppress = false; idleTurns = 0;
-  setWakeMute(false);            // back to standby, listening for the wake word
+  convo = false; suppress = false; idleTurns = 0; oneShot = false;
+  // Wait before re-arming. Unmuting the instant playback ends lets the tail of
+  // his own voice, still coming out of the speakers, score as a wake word.
+  setTimeout(() => { if (!convo) setWakeMute(false); }, 1500);
   if (recognition){ try{ recognition.onend = null; recognition.stop(); }catch(_){} recognition=null; }
   if (vad){ clearInterval(vad); vad=null; }
   if (recorder && recorder.state==='recording'){ recorder._cancel=true; try{recorder.stop();}catch(_){} }
@@ -430,7 +432,7 @@ async function ship(){
   if (!spoke || blob.size < 1400 || performance.now()-turnStart < MIN_TURN_MS){
     // Nothing said. After a couple of these, close the conversation and hand the
     // floor back to the wake word rather than holding the mic open forever.
-    if (++idleTurns >= IDLE_TURNS_BEFORE_SLEEP && wakeAvailable){
+    if ((oneShot || ++idleTurns >= IDLE_TURNS_BEFORE_SLEEP) && wakeAvailable){
       log('voice','VOICE','no speech - back to standby, say "Hey JARVIS"');
       stopConvo();
       return;
@@ -458,8 +460,13 @@ async function ship(){
     $('#input').value = ''; disarm();
     log('send','SEND',`auto-sent voice: ${full}`);
     await transmit(full);                       // runs, then speaks; both with mic deaf
-    // turn's done — hand the floor back and listen again
     suppress = false;
+    if (oneShot){
+      // Woken by the wake word: one question, one answer, back to standby.
+      log('voice','VOICE','answered - back to standby');
+      stopConvo();
+      return;
+    }
     if (convo) beginTurn();
   } catch(e){
     log('error','VOICE','transcription failed');
@@ -574,9 +581,10 @@ setInterval(async () => {
   try {
     const w = await fetch('/api/wake', {headers:apiHeaders()}).then(r => r.json());
     if (!w.triggered) return;
-    log('voice','WAKE',`"Hey JARVIS" detected (${(w.score||0).toFixed(2)})`);
+    log('voice','WAKE',`wake word detected (${(w.score||0).toFixed(2)})`);
     chirp();
     setState('listening','LISTENING','wake word - go ahead');
+    oneShot = true;
     micToggle();
   } catch(_){}
 }, 500);

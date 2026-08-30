@@ -37,9 +37,10 @@ logger = logging.getLogger(__name__)
 FRAME = 1280                      # 80 ms at 16 kHz -- openWakeWord's frame size
 SAMPLE_RATE = 16000
 COOLDOWN_S = 3.0                  # ignore repeat hits right after a trigger
+TRIGGER_FRAMES = 2                # consecutive frames over threshold before firing
 
 ENABLED = os.environ.get("JARVIS_WAKE", "1").strip() != "0"
-THRESHOLD = float(os.environ.get("JARVIS_WAKE_THRESHOLD", "0.5") or 0.5)
+THRESHOLD = float(os.environ.get("JARVIS_WAKE_THRESHOLD", "0.6") or 0.6)
 _DEVICE = os.environ.get("JARVIS_WAKE_DEVICE", "").strip()
 DEVICE = int(_DEVICE) if _DEVICE.isdigit() else None
 
@@ -78,12 +79,19 @@ def _load_model():
         except Exception as e:                                 # noqa: BLE001
             logger.warning("wake: model download failed: %s", e)
 
-    for spec in (["hey_jarvis"], ["hey_jarvis_v0.1"], None):
-        try:
-            return Model(wakeword_models=spec) if spec else Model()
-        except Exception as e:                                 # noqa: BLE001
-            last = e
-    raise RuntimeError(f"could not load a wake word model: {last}")
+    # vad_threshold gates scoring on the bundled Silero voice-activity model, so
+    # keyboard clatter and music cannot score at all. Older releases lack the
+    # argument, hence the retry without it.
+    last = None
+    for spec in (["hey_jarvis"], ["hey_jarvis_v0.1"]):
+        for kwargs in ({"vad_threshold": 0.5}, {}):
+            try:
+                return Model(wakeword_models=spec, **kwargs)
+            except Exception as e:                             # noqa: BLE001
+                last = e
+    # Deliberately no "load everything" fallback: that scores alexa, timer and
+    # weather too, and any of them firing looks exactly like a broken wake word.
+    raise RuntimeError(f"could not load the hey_jarvis model: {last}")
 
 
 def _jarvis_score(scores):
@@ -128,6 +136,7 @@ def _loop():
     logger.info("wake: listening for 'hey jarvis' (threshold %.2f)", THRESHOLD)
 
     last_trigger = 0.0
+    hot = 0                       # consecutive frames above threshold
     try:
         while not _STOP.is_set():
             try:
@@ -145,6 +154,7 @@ def _loop():
                         model.reset()
                     except Exception:                          # noqa: BLE001
                         pass
+                hot = 0
                 with _LOCK:
                     _STATE["score"] = 0.0
                 continue
@@ -161,7 +171,9 @@ def _loop():
                 _STATE["score"] = score
                 _STATE["peak"] = max(_STATE["peak"], score)
 
-            if score >= THRESHOLD and (now - last_trigger) > COOLDOWN_S:
+            hot = hot + 1 if score >= THRESHOLD else 0
+            if hot >= TRIGGER_FRAMES and (now - last_trigger) > COOLDOWN_S:
+                hot = 0
                 last_trigger = now
                 if hasattr(model, "reset"):
                     try:
