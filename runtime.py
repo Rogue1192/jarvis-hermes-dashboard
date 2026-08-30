@@ -19,6 +19,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import threading
 import time
 
@@ -70,15 +71,37 @@ def _mono_ms():
     return int(time.monotonic() * 1000)
 
 
+def _windows_hermes():
+    """Known-good locations for hermes.exe on a native Windows install."""
+    local = os.environ.get("LOCALAPPDATA", "")
+    if not local:
+        return None
+    for candidate in (
+        os.path.join(local, "hermes", "hermes-agent", "venv", "Scripts", "hermes.exe"),
+        os.path.join(local, "hermes", "bin", "hermes.exe"),
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def _hermes_base():
     configured = os.environ.get("HERMES_CMD", "").strip()
     if configured:
-        return shlex.split(configured)
+        # A bare Windows path must not go through shlex, which eats backslashes.
+        if os.path.isfile(configured):
+            return [configured]
+        return shlex.split(configured, posix=(os.name != "nt"))
     exe = shutil.which("hermes")
     if exe:
         return [exe]
-    # Last-resort module invocation; start.sh prepends common Python bin dirs.
-    return ["python3", "-m", "hermes_cli.main"]
+    if os.name == "nt":
+        found = _windows_hermes()
+        if found:
+            return [found]
+    # Last-resort module invocation. "python3" does not exist on Windows, where
+    # it is usually a Store alias stub that exits without running anything.
+    return [sys.executable or "python3", "-m", "hermes_cli.main"]
 
 
 def _can_launch_hermes():
@@ -161,15 +184,30 @@ def _run_hermes_locked(message, session_id=None, system=None):
                session_id=session_id)
 
     child_env = dict(os.environ)
-    # Ensure GUI-started shells can still find common Homebrew/user installs.
+    # Ensure GUI-started shells can still find common user installs.
+    #
+    # Windows separates PATH with ";" and keeps tools elsewhere. Joining with ":"
+    # here handed the Hermes subprocess a corrupted PATH, so everything Hermes
+    # shelled out to afterwards (git, node, ffmpeg, ripgrep) failed to resolve
+    # while Hermes itself still launched -- a confusing half-working state.
     home = os.path.expanduser("~")
-    child_env["PATH"] = ":".join(dict.fromkeys([
-        child_env.get("PATH", ""),
-        "/opt/homebrew/bin", "/usr/local/bin",
-        os.path.join(home, ".local", "bin"),
-        os.path.join(home, ".npm-global", "bin"),
-        "/usr/bin", "/bin", "/usr/sbin", "/sbin",
-    ]))
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
+        extra = [
+            os.path.join(local, "hermes", "bin"),
+            os.path.join(local, "hermes", "hermes-agent", "venv", "Scripts"),
+            os.path.join(local, "hermes", "git", "cmd"),
+            os.path.join(local, "Microsoft", "WindowsApps"),
+        ]
+    else:
+        extra = [
+            "/opt/homebrew/bin", "/usr/local/bin",
+            os.path.join(home, ".local", "bin"),
+            os.path.join(home, ".npm-global", "bin"),
+            "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+        ]
+    child_env["PATH"] = os.pathsep.join(
+        dict.fromkeys([child_env.get("PATH", ""), *extra]))
 
     try:
         proc = subprocess.Popen(cmd, cwd=WORKDIR, text=True, bufsize=1,

@@ -12,6 +12,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -133,11 +134,21 @@ _CMD = re.compile(r"^\s*/(new|profile|goal|personality|kanban|mission|missions|b
 def _hermes_command(*args):
     configured = os.environ.get("HERMES_CMD", "").strip()
     if configured:
-        return shlex.split(configured) + list(args)
+        if os.path.isfile(configured):
+            return [configured, *args]
+        return shlex.split(configured, posix=(os.name != "nt")) + list(args)
     executable = shutil.which("hermes")
     if executable:
         return [executable, *args]
-    return ["python3", "-m", "hermes_cli.main", *args]
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA", "")
+        for candidate in (
+            os.path.join(local, "hermes", "hermes-agent", "venv", "Scripts", "hermes.exe"),
+            os.path.join(local, "hermes", "bin", "hermes.exe"),
+        ):
+            if local and os.path.isfile(candidate):
+                return [candidate, *args]
+    return [sys.executable or "python3", "-m", "hermes_cli.main", *args]
 
 
 def _shell(cmd, timeout=25):
