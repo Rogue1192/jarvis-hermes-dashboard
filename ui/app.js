@@ -233,7 +233,12 @@ let recognition = null;
 let micStream=null, recorder=null, chunks=[], actx=null, analyser=null, vdata=null;
 let vad=null, spoke=false, loudAt=0, turnStart=0;
 let floorSum=0, floorN=0, threshold=0.02, peak=0, calibrating=true;
-const SILENCE=900, MIN_TURN_MS=350, MAX_TURN_MS=18000, NO_SPEECH_MS=10000;
+// How long a pause ends your turn. 900ms cut people off mid-sentence whenever
+// they spelled something out, read a number, or simply thought for a moment --
+// the gaps between spoken letters are longer than that. Tunable via
+// JARVIS_SILENCE_MS in .env.
+let SILENCE = 1400;
+const MIN_TURN_MS=350, MAX_TURN_MS=18000, NO_SPEECH_MS=10000;
 // After JARVIS answers he keeps listening this long for a follow-up, then sleeps.
 // Long enough to carry on a conversation, short enough that the mic is not live
 // in the room all day.
@@ -606,6 +611,7 @@ setInterval(async () => {
     const s = await fetch('/api/status').then(r=>r.json());
     RT.tts = s.tts==='elevenlabs'; RT.stt = s.stt==='elevenlabs';
     RT.browserStt = !!SpeechRecognition; RT.browserTts = !!speechSynth;
+    if (s.silence_ms) SILENCE = s.silence_ms;
 
     const port = location.port || '8730';
     sys('gw', `online · :${port}`, 'ok');

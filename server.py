@@ -134,6 +134,7 @@ class Handler(BaseHTTPRequestHandler):
                 voice_id=voice.voice_id() if voice.available() else "browser",
                 stt="elevenlabs" if voice.available() else "browser",
                 tts="elevenlabs" if voice.available() else "browser",
+                silence_ms=int(os.environ.get("JARVIS_SILENCE_MS", "1400") or 1400),
                 wake=wake.status(),
                 session=SESSION["id"]))
         if p == "/api/wake":
