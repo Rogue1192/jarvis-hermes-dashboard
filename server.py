@@ -15,6 +15,7 @@ import pathlib
 import secrets
 import sys
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -271,6 +272,52 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
 
+def _chrome():
+    """First Chrome or Edge we can find, or None."""
+    import shutil
+    for var, rel in (
+        ("ProgramFiles", r"Google\Chrome\Application\chrome.exe"),
+        ("ProgramFiles(x86)", r"Google\Chrome\Application\chrome.exe"),
+        ("LOCALAPPDATA", r"Google\Chrome\Application\chrome.exe"),
+        ("ProgramFiles", r"Microsoft\Edge\Application\msedge.exe"),
+        ("ProgramFiles(x86)", r"Microsoft\Edge\Application\msedge.exe"),
+    ):
+        base = os.environ.get(var)
+        if base:
+            path = os.path.join(base, rel)
+            if os.path.isfile(path):
+                return path
+    return shutil.which("chrome") or shutil.which("msedge")
+
+
+def _open_window():
+    """Open the HUD in a chrome-less app window once the port is answering.
+
+    App mode rather than a native wrapper on purpose: it reuses the browser
+    profile that already holds your microphone permission for this address. A
+    wrapper would have to broker that permission itself, and one that quietly
+    denied it would break voice while looking perfectly fine.
+    """
+    import socket
+    import subprocess
+    url = f"http://127.0.0.1:{PORT}"
+    for _ in range(60):
+        try:
+            with socket.create_connection(("127.0.0.1", PORT), timeout=0.5):
+                break
+        except OSError:
+            time.sleep(0.5)
+    exe = _chrome()
+    if not exe or os.environ.get("JARVIS_APP_WINDOW", "1") == "0":
+        webbrowser.open(url)
+        return
+    try:
+        subprocess.Popen([exe, f"--app={url}", "--window-size=1600,950"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:                                          # noqa: BLE001
+        webbrowser.open(url)
+
+
 def main():
     kind = runtime.runtime_kind()
     brain = ("Hermes Agent (profile tools, skills, memory, MCP, browser integrations live)"
@@ -302,7 +349,7 @@ def main():
 
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     if os.environ.get("JARVIS_OPEN", "1") != "0":
-        webbrowser.open(f"http://localhost:{PORT}")
+        threading.Thread(target=_open_window, daemon=True).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
