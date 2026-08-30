@@ -300,6 +300,52 @@ def _chrome():
     return shutil.which("chrome") or shutil.which("msedge")
 
 
+def _place_window(x, y, w, h, timeout=20):
+    """Move the app window onto the monitor we actually asked for.
+
+    Chrome's --window-position is only honoured when Chrome is not already
+    running. When it is, the existing process creates the window and restores
+    the app's last remembered bounds instead, silently ignoring the flag -- so
+    the window lands wherever it was last time, no matter what we pass.
+
+    Rather than fight that with a separate browser profile (which would lose the
+    microphone permission granted to this address), find the window by title and
+    move it with the Windows API.
+    """
+    if os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    SWP_NOZORDER, SWP_NOACTIVATE = 0x0004, 0x0010
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def scan(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n:
+            buf = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(hwnd, buf, n + 1)
+            if buf.value.startswith("JARVIS"):
+                found.append(hwnd)
+                return False
+        return True
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        found.clear()
+        user32.EnumWindows(scan, 0)
+        if found:
+            user32.SetWindowPos(found[0], 0, int(x), int(y), int(w), int(h),
+                                SWP_NOZORDER | SWP_NOACTIVATE)
+            return True
+        time.sleep(0.4)
+    return False
+
+
 def _open_window():
     """Open the HUD in a chrome-less app window once the port is answering.
 
@@ -335,6 +381,15 @@ def _open_window():
         subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:                                          # noqa: BLE001
         webbrowser.open(url)
+        return
+    if pos:
+        try:
+            x, y = (int(v) for v in pos.split(","))
+            w, h = (int(v) for v in size.split(","))
+            threading.Thread(target=_place_window, args=(x, y, w, h),
+                             daemon=True).start()
+        except ValueError:
+            pass
 
 
 def main():
