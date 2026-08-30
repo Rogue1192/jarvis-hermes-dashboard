@@ -20,6 +20,15 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+# Windows defaults stdout to the cp1252 code page. Redirect that to a file and
+# any non-ASCII character in our own output kills the process on startup. Ask for
+# UTF-8 explicitly rather than keeping every future print() ASCII-only.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:                                          # noqa: BLE001
+        pass
+
 ROOT = pathlib.Path(__file__).resolve().parent
 UI = ROOT / "ui"
 
@@ -330,7 +339,7 @@ def main():
 
     print(f"""
   JARVIS · Hermes Live HUD
-  ──────────────────────────────────────────────
+  ----------------------------------------------
   brain        {brain}
   profile      {runtime.PROFILE}
   workdir      {runtime.WORKDIR}
