@@ -49,4 +49,4 @@ Write-Host "Python:  $python"
 Write-Host "Hermes:  $(if ($env:HERMES_CMD) { $env:HERMES_CMD } elseif ($hermes) { $hermes.Source } else { 'not found' })"
 Write-Host ""
 
-& $python server.py
+& $python launch.py

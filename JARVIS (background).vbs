@@ -12,5 +12,5 @@ sh.CurrentDirectory = root
 ' UTF-8 mode: Windows would otherwise use cp1252 for redirected output.
 sh.Environment("PROCESS")("PYTHONUTF8") = "1"
 sh.Environment("PROCESS")("PYTHONIOENCODING") = "utf-8"
-cmd = "cmd /c " & q & q & py & q & " server.py > jarvis.log 2>&1" & q
+cmd = "cmd /c " & q & q & py & q & " launch.py > jarvis.log 2>&1" & q
 sh.Run cmd, 0, False
