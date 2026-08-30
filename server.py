@@ -34,6 +34,7 @@ if _env.exists():
 import commands         # noqa: E402
 import runtime          # noqa: E402
 import voice            # noqa: E402
+import wake             # noqa: E402
 
 PORT = int(os.environ.get("JARVIS_PORT", "8730"))
 API_TOKEN = secrets.token_urlsafe(32)
@@ -123,7 +124,14 @@ class Handler(BaseHTTPRequestHandler):
                 voice_id=voice.voice_id() if voice.available() else "browser",
                 stt="elevenlabs" if voice.available() else "browser",
                 tts="elevenlabs" if voice.available() else "browser",
+                wake=wake.status(),
                 session=SESSION["id"]))
+        if p == "/api/wake":
+            if not self._token_ok():
+                return self._json({"error": "unauthorized"}, 401)
+            # Consuming the flag here is deliberate: exactly one poller can win
+            # a given detection, so two open tabs cannot both start a turn.
+            return self._json(dict(triggered=wake.take_trigger(), **wake.status()))
         if p == "/api/jobs":
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
@@ -150,7 +158,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._token_ok():
             return self._json({"error": "unauthorized"}, 401)
         ctype = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
-        if p in {"/api/run", "/api/speak", "/api/new", "/api/cancel"} and ctype != "application/json":
+        if p in {"/api/run", "/api/speak", "/api/new", "/api/cancel", "/api/wake"} and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
         if p == "/api/listen" and not ctype.startswith("audio/"):
             return self._json({"error": "audio content type required"}, 415)
@@ -172,6 +180,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"text": voice.transcribe(raw, mime)})
             except Exception as e:                        # noqa: BLE001
                 return self._json({"error": str(e)[:300], "text": ""}, 503)
+
+        if p == "/api/wake":
+            try:
+                wake.mute(bool(json.loads(raw or b"{}").get("mute")))
+            except json.JSONDecodeError:
+                return self._json({"error": "bad json"}, 400)
+            return self._json(dict(ok=True, **wake.status()))
 
         if p == "/api/new":
             runtime.cancel_active()
@@ -276,6 +291,14 @@ def main():
   voice        {vo} + browser Web Speech fallback
   open         http://localhost:{PORT}
 """, flush=True)
+
+    if wake.ENABLED:
+        print("  starting wake word (first run downloads the model)...", flush=True)
+        ok = wake.start()
+        st = wake.status()
+        print("  wake word    " + ("listening for 'Hey JARVIS'" if ok
+                                   else f"unavailable - {st.get('error') or 'unknown'}"),
+              flush=True)
 
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     if os.environ.get("JARVIS_OPEN", "1") != "0":

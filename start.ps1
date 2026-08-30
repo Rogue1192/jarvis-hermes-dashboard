@@ -18,6 +18,7 @@ if (-not (Test-Path ".env")) {
 # Prefer the Python that Hermes installs; fall back to whatever is on PATH.
 $python = $null
 $candidates = @(
+    (Join-Path $PSScriptRoot ".venv\Scripts\python.exe"),
     (Join-Path $env:LOCALAPPDATA "hermes\python\python.exe"),
     (Join-Path $env:LOCALAPPDATA "hermes\hermes-agent\venv\Scripts\python.exe")
 )

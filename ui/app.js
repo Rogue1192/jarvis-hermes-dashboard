@@ -199,6 +199,36 @@ function cleanForSpeech(text){
    — otherwise it transcribes his own voice through the speakers and talks to
    itself forever. That's why re-arming happens only after he finishes. */
 let convo = false, suppress = false;
+// Wake word. The detector lives in the Python server (browsers suspend audio in
+// background tabs), so the browser's only jobs are: poll for a trigger, and mute
+// the detector while a conversation is live so JARVIS never wakes on his own voice.
+let wakeAvailable = false, idleTurns = 0;
+const IDLE_TURNS_BEFORE_SLEEP = 2;
+
+function setWakeMute(on){
+  if (!wakeAvailable) return;
+  fetch('/api/wake', {method:'POST', headers:apiHeaders({'content-type':'application/json'}),
+                      body: JSON.stringify({mute: !!on})}).catch(()=>{});
+}
+
+// A short two-tone chirp, generated locally. A wake word you cannot hear
+// respond is indistinguishable from one that did not fire.
+function chirp(){
+  try {
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const now = ctx.currentTime;
+    [[880, 0], [1320, .09]].forEach(([hz, at]) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = hz;
+      g.gain.setValueAtTime(0.0001, now+at);
+      g.gain.exponentialRampToValueAtTime(0.18, now+at+.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, now+at+.10);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(now+at); o.stop(now+at+.12);
+    });
+    setTimeout(() => ctx.close().catch(()=>{}), 600);
+  } catch(_){}
+}
 let recognition = null;
 let micStream=null, recorder=null, chunks=[], actx=null, analyser=null, vdata=null;
 let vad=null, spoke=false, loudAt=0, turnStart=0;
@@ -258,14 +288,16 @@ async function micToggle(){
     analyser = actx.createAnalyser(); analyser.fftSize = 1024;
     actx.createMediaStreamSource(micStream).connect(analyser);
     vdata = new Uint8Array(analyser.fftSize);
-    convo = true; suppress = false;
+    convo = true; suppress = false; idleTurns = 0;
+    setWakeMute(true);
     $('#mic').classList.add('on'); $('#mic').textContent = '● ElevenLabs Live';
     log('voice','VOICE','ElevenLabs voice conversation open · listening');
     beginTurn();
     return;
   }
   if (SpeechRecognition){
-    convo = true; suppress = false;
+    convo = true; suppress = false; idleTurns = 0;
+    setWakeMute(true);
     $('#mic').classList.add('on'); $('#mic').textContent = '● Browser Live';
     log('voice','VOICE','browser speech recognition open · listening');
     setState('listening','LISTENING','browser speech online');
@@ -276,7 +308,8 @@ async function micToggle(){
 }
 
 function stopConvo(){
-  convo = false; suppress = false;
+  convo = false; suppress = false; idleTurns = 0;
+  setWakeMute(false);            // back to standby, listening for the wake word
   if (recognition){ try{ recognition.onend = null; recognition.stop(); }catch(_){} recognition=null; }
   if (vad){ clearInterval(vad); vad=null; }
   if (recorder && recorder.state==='recording'){ recorder._cancel=true; try{recorder.stop();}catch(_){} }
@@ -395,6 +428,13 @@ async function ship(){
   if (cancel){ return; }
   // no speech heard, too short, or too small — just listen again, don't ship ambient noise
   if (!spoke || blob.size < 1400 || performance.now()-turnStart < MIN_TURN_MS){
+    // Nothing said. After a couple of these, close the conversation and hand the
+    // floor back to the wake word rather than holding the mic open forever.
+    if (++idleTurns >= IDLE_TURNS_BEFORE_SLEEP && wakeAvailable){
+      log('voice','VOICE','no speech - back to standby, say "Hey JARVIS"');
+      stopConvo();
+      return;
+    }
     if (convo && !suppress) beginTurn();
     return;
   }
@@ -411,6 +451,7 @@ async function ship(){
       if (convo) beginTurn(); else setState('','STANDBY','nothing heard');
       return;
     }
+    idleTurns = 0;
     log('voice','VOICE',`transcribed by ElevenLabs in ${ms}ms: "${text}"`);
     const armed = $('#input').dataset.cmd || '';
     const full = (armed ? armed + ' ' : '') + text;
@@ -526,6 +567,20 @@ setInterval(async () => {
   } catch(_){}
 }, 4000);
 
+// poll for a wake word trigger. 500ms is well inside the pause a person leaves
+// after saying "Hey JARVIS", and it is one tiny local request.
+setInterval(async () => {
+  if (!wakeAvailable || convo || running) return;
+  try {
+    const w = await fetch('/api/wake', {headers:apiHeaders()}).then(r => r.json());
+    if (!w.triggered) return;
+    log('voice','WAKE',`"Hey JARVIS" detected (${(w.score||0).toFixed(2)})`);
+    chirp();
+    setState('listening','LISTENING','wake word - go ahead');
+    micToggle();
+  } catch(_){}
+}, 500);
+
 // ══════════ boot ══════════
 (async () => {
   defaultTip = $('#tip').textContent;
@@ -550,6 +605,14 @@ setInterval(async () => {
     log('status', 'BOOT',
         `gateway online · ${s.runtime} core · profile=${s.profile || 'default'} · permission=${s.permission}`);
     log('voice', 'VOICE', `channel ready — ${RT.stt ? 'ElevenLabs STT' : (RT.browserStt ? 'browser STT' : s.stt)} / ${RT.tts ? 'ElevenLabs TTS' : 'browser TTS'}`);
+    wakeAvailable = !!(s.wake && s.wake.running);
+    if (wakeAvailable){
+      setWakeMute(false);
+      log('voice', 'WAKE', `standby — say "Hey JARVIS" (threshold ${s.wake.threshold})`);
+      $('#top-voice').textContent += ' · wake: Hey JARVIS';
+    } else if (s.wake && s.wake.enabled){
+      log('error', 'WAKE', `wake word off — ${s.wake.error || 'not running'}`);
+    }
     $('#mic').textContent = RT.stt ? '◉ ElevenLabs Voice' : '◉ Browser Voice';
     setState('', 'STANDBY', 'awaiting uplink');
   } catch(e){
