@@ -109,7 +109,7 @@ def _can_launch_hermes():
         base = _hermes_base()
         proc = subprocess.run(base + ["--version"], cwd=WORKDIR, text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              timeout=12)
+                              timeout=12, encoding="utf-8", errors="replace")
         return proc.returncode == 0, (proc.stdout or proc.stderr).strip()
     except Exception as e:  # noqa: BLE001
         return False, str(e)
@@ -154,7 +154,7 @@ def hermes_tools_snapshot(limit=36):
         base = _hermes_base()
         proc = subprocess.run(base + ["tools", "list"], cwd=WORKDIR, text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              timeout=20)
+                              timeout=20, encoding="utf-8", errors="replace")
         out = (proc.stdout or proc.stderr or "").strip()
         tools = []
         for line in out.splitlines():
@@ -208,11 +208,15 @@ def _run_hermes_locked(message, session_id=None, system=None):
         ]
     child_env["PATH"] = os.pathsep.join(
         dict.fromkeys([child_env.get("PATH", ""), *extra]))
+    # Windows Python defaults to the cp1252 code page, which cannot represent the
+    # check marks and emoji Hermes prints. Decoding then raises, the exception is
+    # swallowed, and the UI reports an empty tool list. Pin both ends to UTF-8.
+    child_env.setdefault("PYTHONIOENCODING", "utf-8")
 
     try:
         proc = subprocess.Popen(cmd, cwd=WORKDIR, text=True, bufsize=1,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                env=child_env)
+                                env=child_env, encoding="utf-8", errors="replace")
         with _ACTIVE_LOCK:
             _ACTIVE_PROC = proc
     except FileNotFoundError:

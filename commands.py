@@ -154,7 +154,7 @@ def _hermes_command(*args):
 def _shell(cmd, timeout=25):
     try:
         p = subprocess.run(cmd, text=True, cwd=os.getcwd(), stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE, timeout=timeout)
+                           stderr=subprocess.PIPE, timeout=timeout, encoding="utf-8", errors="replace")
         return (p.stdout or p.stderr or "").strip()[:3500]
     except Exception as e:  # noqa: BLE001
         return f"Unavailable: {e}"
