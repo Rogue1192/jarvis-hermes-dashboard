@@ -45,6 +45,45 @@ if (-not $hermes) {
     }
 }
 
+# Open in a chrome-less app window rather than a browser tab.
+#
+# Deliberately NOT a separate browser profile: the microphone permission you
+# granted to 127.0.0.1:8730 lives in your normal profile, and a fresh profile
+# would make you grant it again every launch.
+#
+# Chrome app mode is used in preference to a native webview wrapper because a
+# webview host has to broker microphone permission itself, and a wrapper that
+# silently denies the mic would break voice while looking fine.
+$chrome = $null
+foreach ($c in @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe",
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+)) { if (Test-Path $c) { $chrome = $c; break } }
+
+$port = if ($env:JARVIS_PORT) { $env:JARVIS_PORT } else { "8730" }
+$url  = "http://127.0.0.1:$port"
+
+if ($chrome -and $env:JARVIS_APP_WINDOW -ne "0") {
+    $env:JARVIS_OPEN = "0"          # stop server.py opening a second tab
+    Start-Job -ScriptBlock {
+        param($exe, $target)
+        # Wait for the port to answer rather than guessing at a delay -- the
+        # first run loads the wake word model and is much slower than later ones.
+        for ($i = 0; $i -lt 60; $i++) {
+            try {
+                (New-Object Net.Sockets.TcpClient).Connect("127.0.0.1", ([Uri]$target).Port)
+                break
+            } catch { Start-Sleep -Milliseconds 500 }
+        }
+        & $exe "--app=$target" "--window-size=1600,950"
+    } -ArgumentList $chrome, $url | Out-Null
+    Write-Host "Window:  app mode ($([IO.Path]::GetFileName($chrome)))"
+} else {
+    Write-Host "Window:  browser tab (no Chrome or Edge found)"
+}
+
 Write-Host "Python:  $python"
 Write-Host "Hermes:  $(if ($env:HERMES_CMD) { $env:HERMES_CMD } elseif ($hermes) { $hermes.Source } else { 'not found' })"
 Write-Host ""
