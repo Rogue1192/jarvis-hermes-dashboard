@@ -321,9 +321,18 @@ def _open_window():
     if not exe or os.environ.get("JARVIS_APP_WINDOW", "1") == "0":
         webbrowser.open(url)
         return
+    # Which monitor to land on. Windows gives every screen a coordinate in one big
+    # virtual desktop, so a screen above the primary one has a negative Y. Get the
+    # numbers from PowerShell:
+    #   Add-Type -AssemblyName System.Windows.Forms
+    #   [System.Windows.Forms.Screen]::AllScreens | Select DeviceName, Bounds
+    size = os.environ.get("JARVIS_WINDOW_SIZE", "1600,950").strip()
+    pos = os.environ.get("JARVIS_WINDOW_POS", "").strip()
+    args = [exe, f"--app={url}", f"--window-size={size}"]
+    if pos:
+        args.append(f"--window-position={pos}")
     try:
-        subprocess.Popen([exe, f"--app={url}", "--window-size=1600,950"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:                                          # noqa: BLE001
         webbrowser.open(url)
 
