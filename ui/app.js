@@ -502,7 +502,9 @@ $('#mute').onclick = () => {
   if (muted && player) player.pause();
 };
 $('#input').addEventListener('keydown', e => {
-  if (e.key==='Enter' && (e.metaKey||e.ctrlKey)){ e.preventDefault(); sendFromInput(); }
+  // Enter sends. Shift+Enter makes a new line. Requiring Ctrl+Enter to send is
+  // the opposite of what every chat box does and reads as "the app is broken".
+  if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); sendFromInput(); }
 });
 
 // ══════════ system panel ══════════
