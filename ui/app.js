@@ -234,6 +234,11 @@ let micStream=null, recorder=null, chunks=[], actx=null, analyser=null, vdata=nu
 let vad=null, spoke=false, loudAt=0, turnStart=0;
 let floorSum=0, floorN=0, threshold=0.02, peak=0, calibrating=true;
 const SILENCE=900, MIN_TURN_MS=350, MAX_TURN_MS=18000, NO_SPEECH_MS=10000;
+// After JARVIS answers he keeps listening this long for a follow-up, then sleeps.
+// Long enough to carry on a conversation, short enough that the mic is not live
+// in the room all day.
+const FOLLOWUP_MS = 8000;
+let noSpeechWindow = NO_SPEECH_MS;
 
 // ── voice out ──
 let muted = false, player = null;
@@ -309,6 +314,7 @@ async function micToggle(){
 
 function stopConvo(){
   convo = false; suppress = false; idleTurns = 0; oneShot = false;
+  noSpeechWindow = NO_SPEECH_MS;
   // Wait before re-arming. Unmuting the instant playback ends lets the tail of
   // his own voice, still coming out of the speakers, score as a wake word.
   setTimeout(() => { if (!convo) setWakeMute(false); }, 1500);
@@ -421,7 +427,7 @@ function vtick(){
 
   // failsafes so it can never hang: cap the length, re-listen if no speech at all
   if (t - turnStart > MAX_TURN_MS) return endTurn('max-length');
-  if (!spoke && t - turnStart > NO_SPEECH_MS) return endTurn('no-speech');
+  if (!spoke && t - turnStart > noSpeechWindow) return endTurn('no-speech');
 }
 
 async function ship(){
@@ -433,7 +439,7 @@ async function ship(){
     // Nothing said. After a couple of these, close the conversation and hand the
     // floor back to the wake word rather than holding the mic open forever.
     if ((oneShot || ++idleTurns >= IDLE_TURNS_BEFORE_SLEEP) && wakeAvailable){
-      log('voice','VOICE','no speech - back to standby, say "Hey JARVIS"');
+      log('voice','VOICE','nothing said - back to standby, say "Hey JARVIS"');
       stopConvo();
       return;
     }
@@ -462,9 +468,12 @@ async function ship(){
     await transmit(full);                       // runs, then speaks; both with mic deaf
     suppress = false;
     if (oneShot){
-      // Woken by the wake word: one question, one answer, back to standby.
-      log('voice','VOICE','answered - back to standby');
-      stopConvo();
+      // Answered. Stay open briefly for a follow-up so you can just keep talking,
+      // but pause first: re-arming the instant playback ends lets the tail of his
+      // own voice out of the speakers land in the next recording.
+      noSpeechWindow = FOLLOWUP_MS;
+      log('voice','VOICE',`listening for a follow-up (${FOLLOWUP_MS/1000}s)`);
+      setTimeout(() => { if (convo && !suppress) beginTurn(); }, 700);
       return;
     }
     if (convo) beginTurn();
@@ -585,6 +594,7 @@ setInterval(async () => {
     chirp();
     setState('listening','LISTENING','wake word - go ahead');
     oneShot = true;
+    noSpeechWindow = NO_SPEECH_MS;
     micToggle();
   } catch(_){}
 }, 500);
