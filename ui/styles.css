@@ -391,3 +391,10 @@ body.drawer-open .drawer{transform:none}
 .topbar{left:calc(16px + var(--left-w) + 16px)}
 @media (max-width:1600px){ :root{ --left-w: 380px; } }
 @media (max-width:1320px){ :root{ --left-w: 330px; } .hud{grid-template-columns:var(--left-w) 1fr} }
+
+/* The core now has a whole column to itself, and at 181px it was rattling
+   around in it. Scale it to the space, capped so it never crowds the board
+   on a tall screen. */
+.center{padding-top:30px}
+.reactor{width:min(38vh,380px)}
+@media (max-width:1320px){ .reactor{width:min(32vh,300px)} }

@@ -1180,7 +1180,7 @@ setInterval(async () => {
   const note  = document.getElementById('dffNote');
   if (!frame) return;
 
-  const SRC = 'https://app.get-dashflow.com/board';
+  const SRC = 'https://app.get-dashflow.com/embed';
   let loaded = false;
 
   frame.addEventListener('load', () => { loaded = true; note.textContent = ''; });
