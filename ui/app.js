@@ -70,8 +70,31 @@ const SPEECH_MIN_CHUNK = 60;    // don't fire a request for a three-word fragmen
 const SPEECH_BUDGET    = 700;   // same ceiling the old single-shot speak() used
 let spokenUpTo = 0, spokenChars = 0, speakPrev = '', speakChain = Promise.resolve();
 
+// When the previous utterance actually FINISHED playing -- not when it was
+// queued. The event log shows queue time, which is why "One second, checking on
+// it, sir." and "Still on it, sir." looked 4s apart but ran together: the first
+// spent that time in ElevenLabs, and the second was already waiting behind it.
+let lastSpeechEnd = 0;
+const SAY_MIN_GAP = 1600;   // ms of real silence before a second filler
+
+function speakTracked(text, prev){
+  return speak(text, prev).then(() => { lastSpeechEnd = Date.now(); });
+}
+
+// Fillers exist to break silence. If there is no silence -- because the previous
+// line only just stopped -- wait for some before adding another, or it reads as
+// one run-on sentence and defeats the point.
+function speakFiller(text, prev){
+  return speakChain = speakChain.then(async () => {
+    const wait = SAY_MIN_GAP - (Date.now() - lastSpeechEnd);
+    if (lastSpeechEnd && wait > 0) await new Promise(r => setTimeout(r, wait));
+    return speakTracked(text, prev);
+  }).catch(() => {});
+}
+
 function resetSpeechStream(){
   spokenUpTo = 0; spokenChars = 0; speakPrev = '';
+  lastSpeechEnd = 0;              // first filler of a run never waits
   speakChain = Promise.resolve(); speakDone = speakChain;
 }
 
@@ -97,7 +120,7 @@ function enqueueSpeech(final){
   spokenChars += chunk.length;
   const prev = speakPrev;
   speakPrev = chunk;
-  speakChain = speakChain.then(() => speak(chunk, prev)).catch(() => {});
+  speakChain = speakChain.then(() => speakTracked(chunk, prev)).catch(() => {});
   speakDone = speakChain;
 }
 
@@ -192,8 +215,7 @@ function handle(ev){
         spokenChars += ev.text.length;
         const prevSaid = speakPrev;
         speakPrev = ev.text;
-        speakChain = speakChain.then(() => speak(ev.text, prevSaid)).catch(() => {});
-        speakDone = speakChain;
+        speakDone = speakFiller(ev.text, prevSaid);
       }
       break;
     case 'delta':
