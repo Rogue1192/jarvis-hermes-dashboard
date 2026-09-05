@@ -390,17 +390,12 @@ _RETRIEVAL_HINT = re.compile(
 # Spoken the instant a lookup is needed, before the model produces anything.
 # The tool round trip costs 3-5s; silence for that long reads as a hang, while
 # eight words of acknowledgement makes the same wait feel like someone checking.
-_LOOKUP_FILLER = (
-    "Let me look that up. ",
-    "One second, checking. ",
-    "Give me a sec, I'll look it up. ",
-    "Checking now. ",
-)
+_LOOKUP_FILLER = ("One second, checking on it, sir. ",)
 # Spoken when the first pass answered from memory and we are making it go back.
 _RETRY_FILLER = (
-    "Still on it. ",
-    "One more moment, verifying that. ",
-    "Bear with me, checking properly. ",
+    "Still on it, sir. ",
+    "One more moment - verifying that properly. ",
+    "Bear with me, sir, let me check that properly. ",
 )
 
 _FORCE_RETRIEVAL = (
@@ -461,7 +456,11 @@ def run_acp(message, session_id=None, system=None):
 
     # Live-data question. Say so immediately -- this is spoken while the tool
     # round trip happens, so the pause is filled rather than silent.
-    yield dict(t="delta", text=random.choice(_LOOKUP_FILLER))
+    # "say", not "delta": the speech queue buffers short fragments until they
+    # reach a sentence worth synthesising, which is right for an answer and
+    # exactly wrong here -- it held "One second, checking." until the lookup
+    # finished and then said it in the same breath as the result.
+    yield dict(t="say", text=random.choice(_LOOKUP_FILLER))
 
     # Hold the rest until we have seen a real retrieval; text arriving with no
     # tool call means it answered from memory.
@@ -494,7 +493,7 @@ def run_acp(message, session_id=None, system=None):
 
     # Nothing was retrieved. Discard the unspoken answer and make it go look.
     yield dict(t="note", message="answered from memory - forcing a lookup")
-    yield dict(t="delta", text=random.choice(_RETRY_FILLER))
+    yield dict(t="say", text=random.choice(_RETRY_FILLER))
     pending = False
     for ev in agent.prompt(prompt + _FORCE_RETRIEVAL):
         if ev.get("t") == "tool":

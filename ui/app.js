@@ -180,6 +180,22 @@ function handle(ev){
       else
         log('tool', 'TOOL', `✓ ${ev.ok===false?'error':'ok'}`);
       break;
+    case 'say':
+      // Spoken immediately, bypassing the sentence buffer. Used for "let me look
+      // that up" while a tool call runs -- it is only useful if it lands BEFORE
+      // the answer, and it is far too short to survive SPEECH_MIN_CHUNK.
+      answer += ev.text;
+      renderAnswer();
+      log('voice', 'SAY', ev.text.trim());
+      if (speakThisRun && !muted){
+        spokenUpTo = answer.length;        // already handled; never speak it twice
+        spokenChars += ev.text.length;
+        const prevSaid = speakPrev;
+        speakPrev = ev.text;
+        speakChain = speakChain.then(() => speak(ev.text, prevSaid)).catch(() => {});
+        speakDone = speakChain;
+      }
+      break;
     case 'delta':
       answer += ev.text;
       renderAnswer();
