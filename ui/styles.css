@@ -346,3 +346,48 @@ body.drawer-open .drawer-scrim{opacity:1;pointer-events:auto}
 .pill i{width:6px;height:6px}
 .pill span{max-width:132px}
 @media (max-width:1320px){.pill span{max-width:84px}}
+
+/* ── Layout v3 ─────────────────────────────────────────────────────────────
+   The topbar was a band across the whole screen holding three facts that
+   never change, and it cost every column its top 86 pixels. It becomes a
+   small lockup floating over the middle instead: the response column and the
+   DashFlow rail both run floor to ceiling, and the core sits centred in the
+   space between them. */
+.topbar{position:fixed;top:6px;left:16px;right:calc(var(--rail-w) + var(--rail-gap) + 16px);
+        z-index:6;height:auto;padding:0;border-bottom:0;pointer-events:none;
+        display:flex;align-items:flex-start;justify-content:center;gap:14px;
+        transform:scale(.7);transform-origin:top center}
+.topbar .pills{max-width:420px}
+
+/* Nothing reserves space at the top any more, so the working area is the
+   whole screen above the board. */
+.hud{height:calc(100% - var(--bottom-h));padding:10px 16px 6px;
+     padding-right:calc(var(--rail-w) + var(--rail-gap) + 16px);
+     grid-template-columns:minmax(340px,420px) 1fr}
+.dfframe{top:10px}
+
+/* The core, centred in the gap between the response column and the rail, and
+   nudged down so it reads as the middle of the space rather than the top. */
+.center{align-items:center;justify-content:center;padding-top:44px}
+
+/* Action log opens from the left. It is a reading panel, and everything else
+   worth reading on this screen -- the response, the input -- is already
+   over there. */
+.drawer-tab{left:0;right:auto;border-radius:0 16px 16px 0;border-left:0;border-right:1px solid var(--edge)}
+.drawer-tab .dt-label{transform:rotate(180deg)}
+.drawer{left:0;right:auto;border-radius:0 24px 24px 0;transform:translateX(-102%)}
+body.drawer-open .drawer{transform:none}
+
+@media (max-width:1320px){
+  .hud{height:calc(100% - var(--bottom-h));grid-template-columns:minmax(300px,360px) 1fr}
+  .topbar{transform:scale(.62)}
+}
+
+/* The lockup belongs over the middle column, not over the response panel it
+   was landing on. Pin the response column to a known width so the topbar can
+   start where it ends. */
+:root{ --left-w: 420px; }
+.hud{grid-template-columns:var(--left-w) 1fr}
+.topbar{left:calc(16px + var(--left-w) + 16px)}
+@media (max-width:1600px){ :root{ --left-w: 380px; } }
+@media (max-width:1320px){ :root{ --left-w: 330px; } .hud{grid-template-columns:var(--left-w) 1fr} }
