@@ -105,8 +105,12 @@
   <div class="board-head">
     <div class="lbl">Mission board</div>
     <div class="board-meta">
+      <!-- Only speaks up when something is wrong. A board that always says
+           something teaches you to stop reading it. -->
+      <span id="boardSource" class="board-problem"></span>
+      <label class="selall"><input type="checkbox" id="selAllComplete"> all</label>
+      <button class="ctl aux archive-btn" id="archiveBtn" disabled>Archive</button>
       <button class="ctl aux" id="viewArchive">View archive <b id="archiveCount"></b></button>
-      <span id="boardSource">kanban.db · not wired</span>
     </div>
   </div>
   <div class="board-cols" id="boardCols">
@@ -114,7 +118,7 @@
     <div class="bcol" data-status="in_process"><div class="bcol-head">In process <b id="c-in_process">0</b></div><div class="bcol-body" id="col-in_process"></div></div>
     <div class="bcol" data-status="needs_approval"><div class="bcol-head">Needs approval <b id="c-needs_approval">0</b></div><div class="bcol-body" id="col-needs_approval"></div></div>
     <div class="bcol" data-status="final_review"><div class="bcol-head">Final review <b id="c-final_review">0</b></div><div class="bcol-body" id="col-final_review"></div></div>
-    <div class="bcol" data-status="complete"><div class="bcol-head">Complete <b id="c-complete">0</b></div><div class="bcol-body" id="col-complete"></div><div class="bcol-foot"><label class="selall"><input type="checkbox" id="selAllComplete"> all</label><button class="ctl aux archive-btn" id="archiveBtn" disabled>Archive</button></div></div>
+    <div class="bcol" data-status="complete"><div class="bcol-head">Complete <b id="c-complete">0</b></div><div class="bcol-body" id="col-complete"></div></div>
   </div>
 </section>
 

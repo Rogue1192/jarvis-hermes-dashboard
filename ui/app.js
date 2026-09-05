@@ -959,6 +959,7 @@ setInterval(async () => {
       const r = await fetch('/api/board', {headers: apiHeaders()});
       const b = await r.json();
       if (!b.ok){ src.textContent = b.error || 'board unavailable'; return; }
+      src.textContent = '';
       cache = {};
       let total = 0;
       for (const col of cols){
@@ -969,7 +970,6 @@ setInterval(async () => {
           items.map(c => cardHtml(c, col === 'complete')).join('');
         document.getElementById('c-' + col).textContent = items.length;
       }
-      src.textContent = total ? `kanban.db · ${total} card${total===1?'':'s'}` : 'kanban.db · empty';
       document.querySelectorAll('.bcol-body .card').forEach(el => {
         el.onclick = e => {
           // The checkbox is for selecting, not for opening. Let it be itself.
