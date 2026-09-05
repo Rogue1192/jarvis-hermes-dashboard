@@ -243,6 +243,39 @@ def call_tool(name, arguments=None):
     return result, None
 
 
+# DashFlow keeps imported Google appointments in a list called "Google
+# Calendar" and never shows it. From its own lists.functions.ts:
+#
+#   /** Holds imported Google appointments; it is storage only, never shown
+#       as a list. */
+#   export const GOOGLE_IMPORT_LIST_TITLE = "Google Calendar";
+#     ...  .neq("title", GOOGLE_IMPORT_LIST_TITLE)
+#
+# The MCP tools do NOT apply that rule -- list_lists and list_tasks return
+# everything -- so a client that renders them raw shows a Today column made
+# almost entirely of calendar events and an open-count that disagrees with the
+# app. Same rule, same place: hide the list and everything in it.
+HIDDEN_LIST_TITLE = "Google Calendar"
+
+
+def _visible_lists(lists):
+    return [l for l in lists
+            if (l.get("title") or "").strip() != HIDDEN_LIST_TITLE]
+
+
+def _visible_tasks(tasks, hidden_ids):
+    out = []
+    for t in tasks:
+        if t.get("list_id") in hidden_ids:
+            continue
+        # The list title rides on the task, so this also catches a hidden list
+        # that list_lists did not return for whatever reason.
+        if ((t.get("lists") or {}).get("title") or "").strip() == HIDDEN_LIST_TITLE:
+            continue
+        out.append(t)
+    return out
+
+
 def _as_list(payload, *keys):
     if isinstance(payload, list):
         return payload
@@ -260,16 +293,23 @@ def snapshot(list_id=None, status="today"):
     if err:
         return dict(ok=False, error=err, lists=[], tasks=[])
 
-    args = {"status": status, "limit": 100}
+    all_lists = _as_list(lists, "lists", "data", "items")
+    hidden_ids = {l.get("id") for l in all_lists
+                  if (l.get("title") or "").strip() == HIDDEN_LIST_TITLE}
+    shown_lists = _visible_lists(all_lists)
+
+    # Ask for more than we will show, since the hidden ones come out of the
+    # same allowance.
+    args = {"status": status, "limit": 300}
     if list_id:
         args["list_id"] = list_id
     tasks, err = call_tool("list_tasks", args)
     if err:
-        return dict(ok=False, error=err, lists=_as_list(lists, "lists", "data"), tasks=[])
+        return dict(ok=False, error=err, lists=shown_lists, tasks=[])
 
     return dict(ok=True,
-                lists=_as_list(lists, "lists", "data", "items"),
-                tasks=_as_list(tasks, "tasks", "data", "items"),
+                lists=shown_lists,
+                tasks=_visible_tasks(_as_list(tasks, "tasks", "data", "items"), hidden_ids),
                 status=status,
                 list_id=list_id)
 
