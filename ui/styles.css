@@ -97,3 +97,36 @@ body.drawer-open .drawer-scrim{opacity:1;pointer-events:auto}
   .mega{font-size:26px}
   .drawer{width:min(420px,64vw)}
 }
+
+/* ── Lightbox ──────────────────────────────────────────────────────────────
+   The reviewer has to see the thing before deciding on it, so the preview is
+   the largest element here and the verdict buttons sit under it, reachable
+   only once something is on screen. */
+.lightbox{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;background:rgba(1,6,10,.82);backdrop-filter:blur(6px);padding:36px}
+.lightbox.open{display:flex}
+.lb-inner{position:relative;width:min(1100px,92vw);max-height:88vh;display:flex;flex-direction:column;gap:14px;background:linear-gradient(180deg,rgba(7,24,36,.96),rgba(3,13,20,.92));border:1px solid var(--edge-2);border-radius:24px;box-shadow:0 0 80px rgba(64,243,255,.18);padding:22px 24px 24px}
+.lb-close{position:absolute;top:14px;right:16px;cursor:pointer;border:1px solid var(--edge);border-radius:10px;background:rgba(5,18,28,.8);color:var(--mut);font-size:13px;padding:6px 11px}
+.lb-close:hover{color:var(--red);border-color:rgba(255,93,108,.45)}
+.lb-title{font-family:var(--disp);font-size:19px;letter-spacing:.04em;color:var(--ink);padding-right:52px}
+.lb-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:auto;border:1px solid var(--edge);border-radius:16px;background:rgba(2,10,16,.7);padding:14px}
+.lb-stage img,.lb-stage video{max-width:100%;max-height:58vh;border-radius:10px;display:block}
+.lb-copy{align-self:stretch;font-size:16px;line-height:1.7;white-space:pre-wrap;color:var(--ink);padding:6px 4px}
+.lb-url{align-self:stretch;display:flex;flex-direction:column;gap:10px;height:58vh}
+.lb-url a{font-family:var(--mono);font-size:12px;color:var(--cyan);text-decoration:none}
+.lb-url a:hover{text-decoration:underline}
+.lb-url iframe{flex:1;width:100%;border:1px solid var(--edge);border-radius:12px;background:#fff}
+.lb-blocked{font-family:var(--mono);font-size:12px;line-height:1.7;color:var(--amber);text-align:center;max-width:60ch;padding:26px 10px}
+.lb-verdict{flex:0 0 auto;display:flex;flex-direction:column;gap:11px}
+.lb-note{width:100%;background:rgba(3,14,22,.75);border:1px solid var(--edge);border-radius:14px;color:var(--ink);font-family:var(--mono);font-size:12px;padding:12px 14px;outline:0}
+.lb-note:focus{border-color:var(--cyan);box-shadow:0 0 26px rgba(64,243,255,.16)}
+.lb-btns{display:flex;gap:10px}
+.vb{flex:1;cursor:pointer;font-family:var(--mono);font-weight:700;font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:13px 10px;border-radius:14px;border:1px solid var(--edge);background:rgba(5,18,28,.8);color:var(--ink);transition:.16s}
+.vb:hover:not(:disabled){transform:translateY(-1px)}
+.vb.ok{border-color:rgba(57,245,166,.5);color:var(--green);background:rgba(57,245,166,.08)}
+.vb.ok:hover:not(:disabled){box-shadow:0 0 28px rgba(57,245,166,.24)}
+.vb.warn{border-color:rgba(255,182,72,.5);color:var(--amber);background:rgba(255,182,72,.07)}
+.vb.warn:hover{box-shadow:0 0 28px rgba(255,182,72,.22)}
+.vb.bad{border-color:rgba(255,93,108,.45);color:var(--red);background:rgba(255,93,108,.06)}
+.vb.bad:hover{box-shadow:0 0 28px rgba(255,93,108,.2)}
+.vb:disabled{opacity:.32;cursor:not-allowed}
+.card .cm .nope{color:var(--amber)}

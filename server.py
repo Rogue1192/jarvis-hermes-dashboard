@@ -42,7 +42,8 @@ if _env.exists():
             k, _, v = line.partition("=")
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
-import commands         # noqa: E402
+import commands
+import board         # noqa: E402
 import runtime          # noqa: E402
 import voice            # noqa: E402
 import wake             # noqa: E402
@@ -164,6 +165,18 @@ class Handler(BaseHTTPRequestHandler):
             # Consuming the flag here is deliberate: exactly one poller can win
             # a given detection, so two open tabs cannot both start a turn.
             return self._json(dict(triggered=wake.take_trigger(), **wake.status()))
+        if p == "/api/board":
+            if not self._token_ok():
+                return self._json({"error": "unauthorized"}, 401)
+            return self._json(board.snapshot())
+        if p.startswith("/api/board/attachment/"):
+            if not self._token_ok():
+                return self._json({"error": "unauthorized"}, 401)
+            got = board.attachment(p.rsplit("/", 1)[-1])
+            if got is None:
+                return self._bytes(b"not found", "text/plain", 404)
+            data, ctype, _name = got
+            return self._bytes(data, ctype)
         if p == "/api/jobs":
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
@@ -191,6 +204,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "unauthorized"}, 401)
         ctype = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
         if p in {"/api/run", "/api/speak", "/api/new", "/api/cancel", "/api/wake"} and ctype != "application/json":
+            return self._json({"error": "application/json required"}, 415)
+        if p == "/api/board/decide" and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
         if p == "/api/listen" and not ctype.startswith("audio/"):
             return self._json({"error": "audio content type required"}, 415)
@@ -221,6 +236,16 @@ class Handler(BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 return self._json({"error": "bad json"}, 400)
             return self._json(dict(ok=True, **wake.status()))
+
+        if p == "/api/board/decide":
+            try:
+                body = json.loads(raw or b"{}")
+            except json.JSONDecodeError:
+                return self._json({"error": "bad json"}, 400)
+            res = board.decide(task_id=str(body.get("task_id") or ""),
+                               verdict=str(body.get("verdict") or ""),
+                               note=body.get("note"))
+            return self._json(res, 200 if res.get("ok") else 400)
 
         if p == "/api/new":
             runtime.cancel_active()

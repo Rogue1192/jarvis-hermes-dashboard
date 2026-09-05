@@ -825,3 +825,156 @@ setInterval(async () => {
     b.addEventListener('click', () => setOpen(false));
   });
 })();
+
+/* ── Mission board ─────────────────────────────────────────────────────────
+   Reads hermes/kanban.db through /api/board. Three verdicts, and a preview
+   that opens IN the board.
+
+   The rule the whole thing hangs on, from Casey: you cannot approve what you
+   cannot see. OpenMontage's failures are silent -- black video, muted audio,
+   lost subject, every one reported as success. A board where somebody clicks
+   Approve without opening the file is worse than no board, because it launders
+   a broken output as reviewed. So a card with nothing to show says so, and its
+   Approve button is disabled rather than defaulted. */
+(function board(){
+  const cols = ['todo','in_process','needs_approval','final_review','complete'];
+  const src  = document.getElementById('boardSource');
+  if (!src) return;
+
+  const box = document.createElement('div');
+  box.className = 'lightbox';
+  box.innerHTML = '<div class="lb-inner"><button class="lb-close" title="Close">✕</button>'
+                + '<div class="lb-title"></div><div class="lb-stage"></div>'
+                + '<div class="lb-verdict"></div></div>';
+  document.body.appendChild(box);
+  const stage = box.querySelector('.lb-stage');
+  const title = box.querySelector('.lb-title');
+  const verdictRow = box.querySelector('.lb-verdict');
+
+  function shut(){
+    box.classList.remove('open');
+    stage.innerHTML = '';          // stop any video that is still playing
+    verdictRow.innerHTML = '';
+    dropBlobs();
+  }
+  box.querySelector('.lb-close').onclick = shut;
+  box.addEventListener('click', e => { if (e.target === box) shut(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') shut(); });
+
+  /* The attachment route wants the token as a header, and an <img> tag cannot
+     send one. Putting the token in the URL instead would leak it into history,
+     logs and any screen share -- so the bytes are fetched and handed to the
+     element as a blob. Revoked on close so a long session does not hold every
+     video it has ever previewed in memory. */
+  let blobUrls = [];
+  function dropBlobs(){ blobUrls.forEach(URL.revokeObjectURL); blobUrls = []; }
+
+  async function attachmentUrl(id){
+    const r = await fetch('/api/board/attachment/' + encodeURIComponent(id), {headers: apiHeaders()});
+    if (!r.ok) throw new Error('attachment unavailable');
+    const u = URL.createObjectURL(await r.blob());
+    blobUrls.push(u);
+    return u;
+  }
+
+  async function renderPreview(p){
+    if (!p || p.kind === 'none'){
+      return `<div class="lb-blocked">${esc(p && p.blocked || 'Nothing to review on this card.')}</div>`;
+    }
+    if (p.kind === 'image' || p.kind === 'video'){
+      try {
+        const u = await attachmentUrl(p.attachment_id);
+        return p.kind === 'image'
+          ? `<img src="${u}" alt="${esc(p.label||'')}">`
+          : `<video src="${u}" controls autoplay></video>`;
+      } catch(e){
+        // A preview that fails to load is not a preview. Say so plainly rather
+        // than showing a broken frame next to an Approve button.
+        return `<div class="lb-blocked">The file on this card could not be loaded, so there is nothing to review. Approving it would sign off on something nobody has seen.</div>`;
+      }
+    }
+    if (p.kind === 'url')   return `<div class="lb-url"><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.label||p.url)} ↗</a>`
+                                 + `<iframe src="${esc(p.url)}" sandbox="allow-scripts allow-same-origin"></iframe></div>`;
+    if (p.kind === 'text')  return `<div class="lb-copy">${esc(p.text)}</div>`;
+    return '';
+  }
+
+  async function decide(taskId, verdict, note){
+    const r = await fetch('/api/board/decide', {
+      method:'POST', headers: apiHeaders({'content-type':'application/json'}),
+      body: JSON.stringify({task_id: taskId, verdict, note: note || null})
+    });
+    const b = await r.json().catch(()=>({}));
+    if (!r.ok || !b.ok){ alert(b.error || 'could not record that'); return false; }
+    log('complete','BOARD', `${verdict.replace(/_/g,' ')} — ${taskId}`);
+    shut(); load();
+    return true;
+  }
+
+  async function openCard(card){
+    title.textContent = card.title;
+    stage.innerHTML = '<div class="lb-blocked">loading…</div>';
+    box.classList.add('open');
+    stage.innerHTML = await renderPreview(card.preview);
+    // Blocked covers both "no output at all" and "the output would not load".
+    const blocked = !!stage.querySelector('.lb-blocked');
+
+    verdictRow.innerHTML =
+        `<input class="lb-note" id="lbNote" placeholder="What needs changing? (required to reject with changes)">`
+      + `<div class="lb-btns">`
+      + `<button class="vb ok" ${blocked ? 'disabled title="Nothing to look at — approving this would sign off on something nobody has seen"' : ''}>Approve</button>`
+      + `<button class="vb warn">Reject with changes</button>`
+      + `<button class="vb bad">Reject</button>`
+      + `</div>`;
+
+    const note = () => (document.getElementById('lbNote').value || '').trim();
+    const [ok, chg, bad] = verdictRow.querySelectorAll('.vb');
+    ok.onclick  = () => { if (!blocked) decide(card.id, 'approve', note()); };
+    chg.onclick = () => {
+      if (!note()){ document.getElementById('lbNote').focus(); return; }
+      decide(card.id, 'reject_with_changes', note());
+    };
+    bad.onclick = () => decide(card.id, 'reject', note());
+  }
+
+  function cardHtml(c){
+    const meta = [];
+    if (c.agent)  meta.push(`<span class="kind">${esc(c.agent)}</span>`);
+    if (c.client) meta.push(`<span class="client">${esc(c.client)}</span>`);
+    const k = c.preview && c.preview.kind;
+    if (k === 'image') meta.push('<span>image</span>');
+    if (k === 'video') meta.push('<span>video</span>');
+    if (k === 'url')   meta.push('<span>staging</span>');
+    if (k === 'none')  meta.push('<span class="nope">nothing to view</span>');
+    return `<div class="card" data-id="${esc(c.id)}"><div class="ct">${esc(c.title)}</div>`
+         + (meta.length ? `<div class="cm">${meta.join('')}</div>` : '') + `</div>`;
+  }
+
+  let cache = {};
+  async function load(){
+    try {
+      const r = await fetch('/api/board', {headers: apiHeaders()});
+      const b = await r.json();
+      if (!b.ok){ src.textContent = b.error || 'board unavailable'; return; }
+      cache = {};
+      let total = 0;
+      for (const col of cols){
+        const items = b.columns[col] || [];
+        items.forEach(c => cache[c.id] = c);
+        total += items.length;
+        document.getElementById('col-' + col).innerHTML = items.map(cardHtml).join('');
+        document.getElementById('c-' + col).textContent = items.length;
+      }
+      src.textContent = total ? `kanban.db · ${total} card${total===1?'':'s'}` : 'kanban.db · empty';
+      document.querySelectorAll('.bcol-body .card').forEach(el => {
+        el.onclick = () => { const c = cache[el.dataset.id]; if (c) openCard(c); };
+      });
+    } catch(e){
+      src.textContent = 'board unreachable';
+    }
+  }
+
+  load();
+  setInterval(load, 15000);
+  window.jarvisBoard = { reload: load };
+})();
