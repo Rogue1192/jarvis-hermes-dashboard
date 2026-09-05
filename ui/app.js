@@ -1123,12 +1123,18 @@ setInterval(async () => {
       }
 
       const tasks = b.tasks || [];
-      const open  = tasks.filter(t => !t.is_done && t.status !== 'done');
-      const total = tasks.reduce((n,t) => n + (t.estimate_minutes || 0), 0);
+      // Done is status/completed_at -- there is no is_done on a task.
+      const isDone = t => t.status === 'done' || !!t.completed_at;
+      const open   = tasks.filter(t => !isDone(t));
+      // remaining_minutes, not estimate_minutes: it already nets off finished
+      // subtasks, which is what makes the app's "41hr 10min left" mean left.
+      const left = open.reduce((n,t) =>
+        n + (t.remaining_minutes ?? t.total_minutes ?? t.estimate_minutes ?? 0), 0);
+      const soft = open.some(t => t.minutes_are_lower_bound);
 
       srcEl.textContent = '';
       countEl.textContent = tasks.length
-        ? `${open.length} open${total ? ' · ' + mins(total) : ''}`
+        ? `${open.length} open${left ? ` · ${mins(left)}${soft ? '+' : ''} left` : ''}`
         : '';
 
       if (!tasks.length){
@@ -1137,13 +1143,19 @@ setInterval(async () => {
       }
 
       listEl.innerHTML = tasks.map(t => {
-        const done = t.is_done || t.status === 'done';
-        const listName = (lists.find(l => l.id === t.list_id) || {});
+        const done = isDone(t);
+        // The list title rides on the task itself, so it is right even for a
+        // list the pills do not know about -- Google Calendar sync, say.
+        const listName = t.lists && t.lists.title;
+        const sub = t.subtasks_total
+          ? `<span class="tag">${t.subtasks_done}/${t.subtasks_total}</span>` : '';
+        const m = t.remaining_minutes ?? t.total_minutes ?? t.estimate_minutes;
         return `<button class="todo ${done?'done':''}" data-id="${esc(t.id)}">`
              + `<span class="box"></span>`
              + `<span class="txt">${esc(t.title || '(untitled)')}</span>`
-             + (listName.title ? `<span class="tag">${esc(listName.title)}</span>` : '')
-             + (t.estimate_minutes ? `<span class="est">${mins(t.estimate_minutes)}</span>` : '')
+             + sub
+             + (listName ? `<span class="tag">${esc(listName)}</span>` : '')
+             + (m ? `<span class="est">${mins(m)}${t.minutes_are_lower_bound ? '+' : ''}</span>` : '')
              + `</button>`;
       }).join('');
 

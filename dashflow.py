@@ -25,6 +25,10 @@ import urllib.error
 import urllib.request
 
 MCP_URL = "https://app.get-dashflow.com/mcp"
+# The spec requires this on every request AFTER initialize. Servers are
+# entitled to reject a request without it, and the rejection is a 4xx that
+# looks exactly like an auth failure -- which is how it cost an hour once.
+PROTOCOL_VERSION = "2025-06-18"
 _LOCK = threading.Lock()
 _SESSION = {"id": None}
 
@@ -132,8 +136,10 @@ def _parse(body):
 
 def _rpc(method, params, access, want_session=True):
     headers = {"Authorization": "Bearer " + access}
-    if want_session and _SESSION["id"]:
-        headers["Mcp-Session-Id"] = _SESSION["id"]
+    if want_session:
+        headers["MCP-Protocol-Version"] = PROTOCOL_VERSION
+        if _SESSION["id"]:
+            headers["Mcp-Session-Id"] = _SESSION["id"]
     payload = {"jsonrpc": "2.0", "id": int(time.time() * 1000) % 100000,
                "method": method, "params": params}
     resp_headers, body = _post_json(MCP_URL, payload, headers)
@@ -144,7 +150,8 @@ def _rpc(method, params, access, want_session=True):
 
 
 def _notify(method, access):
-    headers = {"Authorization": "Bearer " + access}
+    headers = {"Authorization": "Bearer " + access,
+               "MCP-Protocol-Version": PROTOCOL_VERSION}
     if _SESSION["id"]:
         headers["Mcp-Session-Id"] = _SESSION["id"]
     try:
@@ -181,9 +188,18 @@ def call_tool(name, arguments=None):
                 return None, out["error"].get("message", "DashFlow refused the call")
         except urllib.error.HTTPError as e:
             _SESSION["id"] = None
+            detail = ""
+            try:
+                detail = e.read().decode("utf-8", "replace")[:180]
+            except Exception:                                 # noqa: BLE001
+                pass
             if e.code in (401, 403):
-                return None, "DashFlow rejected the token. Run: hermes mcp login dashflow"
-            return None, "DashFlow returned HTTP %s" % e.code
+                # Say what the server said. "Rejected the token" sent Casey to
+                # re-run a login that was not the problem.
+                return None, ("DashFlow rejected the request (%s)%s. If this persists, "
+                              "run: hermes mcp login dashflow"
+                              % (e.code, " — " + detail if detail else ""))
+            return None, "DashFlow returned HTTP %s%s" % (e.code, " — " + detail if detail else "")
         except (urllib.error.URLError, OSError):
             return None, "DashFlow unreachable"
         except (ValueError, RuntimeError) as e:
