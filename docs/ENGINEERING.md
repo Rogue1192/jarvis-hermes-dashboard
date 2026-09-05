@@ -185,3 +185,51 @@ Worth reporting upstream to Nous.
 WARNING: `hermes update` overwrites local.py and reverts this. If the terminal
 tool starts hanging under ACP again, re-apply the one-liner. Backup of the
 original is beside it as local.py.bak.*
+
+## The retrieval guard (2026-09-04) — and what it does NOT do
+
+Asked tomorrow's weather, JARVIS answered "99, mostly cloudy, essentially no
+rain". NWS said 96, sunny, 20% storms after 1pm. Asked the same question in
+Slack where it genuinely fetched weather.gov, he matched the forecast word for
+word. The failure correlates with not retrieving.
+
+The problem is not weather. A retrieved answer and an invented one are
+indistinguishable by listening, so per-topic rules are whack-a-mole and asking
+the model to self-report whether it looked is worthless — that can be fabricated
+like anything else. Tool calls cannot: they arrive as ACP protocol events
+emitted by the runtime.
+
+So `runtime.py` classifies the question BEFORE Hermes sees it. If it is about
+the current state of the world: speak a filler at once, then HOLD every delta
+until a retrieval tool has COMPLETED (started is not enough — a `python` call
+that imports a module and fetches nothing would otherwise score as looking). If
+the turn ends with nothing retrieved, the answer is discarded UNHEARD, and the
+question is re-sent with an instruction to go and look.
+
+**Known limit, stated plainly: this proves he went and looked. It cannot prove
+he used what he found.** Retrieve-then-answer-from-priors is a real failure and
+there is no mechanical detector for it here. Spot-checking anything that matters
+is still the only thing that catches it — that is how the wrong forecast was
+caught in the first place.
+
+Side effect worth as much as the correctness: the filler lands early, so a
+multi-second lookup stops reading as a hang.
+
+## Writing to DashFlow without the MCP
+
+The DashFlow MCP dropped out of the session when Casey redeployed the app. The
+connector itself stayed enabled and healthy the whole time — a running session
+simply cannot re-acquire a dropped MCP server, and a NEW CHAT gets it back with
+no action needed. Do not send him to reconnect settings; that was a wrong call.
+
+Fallback used: write straight to Supabase project `xjulvzsnojjtiycsypeq`
+("blitzit clone" — that IS DashFlow). Casey's user id
+`80a7722a-d34a-4635-8a95-0f60185082d8`. Lists include "Jarvis/hermes project"
+`07c95454-5a2f-418f-97ad-caef53a0c418`.
+
+Two gotchas:
+- A trigger `tasks_set_today_on` forces `today_on` to the user's CURRENT date,
+  so "today, but tomorrow" is not expressible. Park future work in `this_week`.
+- Writing to the table BYPASSES app logic, including the new Google
+  Calendar/Tasks sync. Tasks created this way may not have pushed to Google.
+  Prefer the MCP when it is available.
