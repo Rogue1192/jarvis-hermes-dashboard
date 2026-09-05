@@ -398,6 +398,15 @@ _RETRY_FILLER = (
     "Bear with me, sir, let me check that properly. ",
 )
 
+# Sent WITH the question, not after it. Without this the model answers from
+# memory, the guard catches it, and the turn is paid twice -- 8.2s instead of
+# ~5s on "what's the weather like today". Cheaper to tell it up front.
+_REQUIRE_RETRIEVAL = (
+    "\n\nThis question is about the current state of the world. Retrieve the actual "
+    "current facts with your tools BEFORE answering -- do not answer from memory "
+    "or estimate. If a lookup fails, say plainly that you could not retrieve it."
+)
+
 _FORCE_RETRIEVAL = (
     "\n\nYou answered that from memory without retrieving anything. The answer may "
     "be wrong and must not be given as-is. Use your tools NOW to look up the actual "
@@ -438,13 +447,23 @@ def run_acp(message, session_id=None, system=None):
     as an error, exactly as a crashed subprocess would.
     """
     agent = _acp_agent()
+    _t0 = time.monotonic()
+    _was_alive = agent.alive()
     if not agent.start():                     # raises or returns False; no events yet
         raise RuntimeError("ACP session unavailable")
+    _start_ms = int((time.monotonic() - _t0) * 1000)
     # The HUD clears SESSION["id"] for /new. With a resident process that has to
     # mean "open a fresh session", or the conversation grows all day and /new
     # quietly does nothing.
     if agent.session_id and not session_id:
         agent.new_session()
+    if _start_ms >= 250 or os.environ.get("JARVIS_TIMING"):
+        # If the resident process died, start() respawns it and pays the whole
+        # handshake again -- that is the shape of an intermittent multi-second
+        # gap before JARVIS says anything.
+        yield dict(t="note", message=(
+            f"agent.start {_start_ms}ms "
+            f"({'reused warm process' if _was_alive else 'RESPAWNED - was not alive'})"))
     yield dict(t="status", model=MODEL or "Hermes default", tools=0, mcp=[],
                permission=PERMISSION, profile=PROFILE, runtime="hermes-acp",
                session_id=agent.session_id)
@@ -461,6 +480,7 @@ def run_acp(message, session_id=None, system=None):
     # exactly wrong here -- it held "One second, checking." until the lookup
     # finished and then said it in the same breath as the result.
     yield dict(t="say", text=random.choice(_LOOKUP_FILLER))
+    prompt = prompt + _REQUIRE_RETRIEVAL
 
     # Hold the rest until we have seen a real retrieval; text arriving with no
     # tool call means it answered from memory.

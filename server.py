@@ -244,6 +244,11 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── the run: NDJSON stream of events ─────────────────────
     def _stream_run(self, raw):
+        # Timing instrumentation. On 2026-09-04 a run showed RUN at :39 and the
+        # first spoken word at :42 -- three seconds unaccounted for, and the same
+        # question was instant the next morning. Intermittent, so it gets
+        # measured rather than theorised about.
+        _t_enter = time.monotonic()
         try:
             payload = json.loads(raw or b"{}")
         except json.JSONDecodeError:
@@ -251,6 +256,7 @@ class Handler(BaseHTTPRequestHandler):
         message = (payload.get("message") or "").strip()
         extra = (payload.get("system") or "").strip()
         system = "\n\n".join(x for x in (persona(), extra) if x) or None
+        _t_persona = time.monotonic()
         fresh = bool(payload.get("fresh"))
         if not message:
             return self._json({"error": "empty message"}, 400)
@@ -268,9 +274,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
         # ── the command matrix: /new /profile /goal /personality /kanban /mission /background /tools /status /browser
+        _t_headers = time.monotonic()
         cmd = commands.handle(
             message,
             runner=lambda m: runtime.run(m, None, persona()))
+        _t_cmd = time.monotonic()
         if cmd:
             if cmd.get("note"):
                 emit(dict(t="note", message=cmd["note"]))
@@ -283,6 +291,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             message = cmd["message"]
             system = "\n\n".join(x for x in (persona(), extra) if x) or None
+
+        _prep = dict(
+            persona=int((_t_persona - _t_enter) * 1000),
+            headers=int((_t_headers - _t_persona) * 1000),
+            commands=int((_t_cmd - _t_headers) * 1000),
+        )
+        if sum(_prep.values()) >= 250 or os.environ.get("JARVIS_TIMING"):
+            emit(dict(t="note", message="prep " + " ".join(
+                f"{k}={v}ms" for k, v in _prep.items())))
 
         try:
             for ev in runtime.run(message, SESSION["id"], system):

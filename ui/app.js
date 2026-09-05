@@ -261,7 +261,31 @@ function cleanForSpeech(text){
 // transcript BEFORE the agent ever sees it, so sleeping never waits on Hermes
 // and never depends on the model choosing to cooperate. The follow-up window
 // stays 8s for natural pauses -- this is the deliberate way out of it.
-const SLEEP_RE = /^\s*(?:ok(?:ay)?[,\s]+)?(?:hey\s+)?(?:jarvis[,\s]*)?(?:please\s+)?(?:go\s+to\s+sleep|goto\s+sleep|go\s+back\s+to\s+sleep|goodnight|good\s*night|stand\s+down|stop\s+listening|that(?:'|\u2019)?s\s+all|that\s+is\s+all|never\s*mind|dismissed|we(?:'|\u2019)?re\s+done|nothing\s+else)\s*[.!,]?\s*$/i;
+// Two classes, because the cost of getting this wrong is lopsided: a missed
+// sleep leaves Casey shouting at a machine that will not stop, while a false
+// sleep costs him saying "Hey JARVIS" once. Bias hard toward sleeping.
+//
+// HARD - matched ANYWHERE in the utterance. Nobody says "go to sleep" to an
+// assistant except as an order, so it does not need to be the whole sentence.
+// This is the case that failed him: the phrase arrived mid-rant, buried in
+// other words, and a whole-utterance match ignored it.
+const SLEEP_HARD = /\b(?:go\s+(?:back\s+)?to\s+sleep|goto\s+sleep|stand\s+down|stop\s+listening|shut\s+up|be\s+quiet|dismissed|good\s*night)\b/i;
+
+// SOFT - these DO occur in ordinary speech ("never mind that, what about..."),
+// so they must be the whole utterance or its final sentence.
+const SLEEP_SOFT = /^\s*(?:(?:ok(?:ay)?|alright|all\s+right|right|well|and|so|yeah|yep|yes|no|cool|great|perfect|awesome|thanks?|thank\s+you|got\s+it|sounds\s+good)[.,!?;:\s]+)*(?:hey\s+)?(?:jarvis[.,!?;:\s]*)?(?:please\s+)?(?:that(?:'|’)?s\s+all|that\s+is\s+all|never\s*mind|we(?:'|’)?re\s+done|nothing\s+else)\s*[.!,?]*\s*$/i;
+
+// A question ABOUT sleeping is not an order to sleep.
+const SLEEP_QUESTION = /\b(?:what|when|why|how|did|do|does|were|was|will|would|should)\b[^.!?]*\b(?:go\s+to\s+sleep|sleeping)\b|\?\s*$/i;
+
+function isSleepCommand(text){
+  const t = String(text || '');
+  if (SLEEP_HARD.test(t) && !SLEEP_QUESTION.test(t)) return true;
+  if (SLEEP_SOFT.test(t)) return true;
+  const parts = t.split(/(?<=[.!?])\s+/).filter(p => p.trim());
+  const last = parts[parts.length - 1];
+  return !!last && SLEEP_SOFT.test(last);
+}
 
 let convo = false, suppress = false;
 // Wake word. The detector lives in the Python server (browsers suspend audio in
@@ -535,7 +559,7 @@ async function ship(){
       if (convo) beginTurn(); else setState('','STANDBY','nothing heard');
       return;
     }
-    if (SLEEP_RE.test(speech)){
+    if (isSleepCommand(speech)){
       log('voice','VOICE',`sleep command: "${speech}"`);
       chirp(true);
       stopConvo();
