@@ -150,3 +150,38 @@ Hermes release fixes terminal-under-ACP, set `JARVIS_ACP=1` and re-run
 
 Do NOT enable it to get the 4 seconds. That is the trade this file already
 forbids.
+
+## RESOLVED: the ACP terminal hang was one missing `stdin=`
+
+2026-09-04, late. Root cause found with a py-spy dump of the hung process:
+
+    _wait_for_tstate_lock -> join -> _communicate -> communicate -> run
+      _bash_starts        (tools/environments/local.py:1057)
+      _find_bash          (tools/environments/local.py:924)
+      init_session        (tools/environments/base.py:841)
+      _create_environment (tools/terminal_tool.py:1982)
+
+It was never running the user's command. It hung *probing for bash* at startup.
+That `subprocess.run(...)` uses capture_output=True but sets no `stdin`, so the
+probe inherits the parent's stdin. Under `hermes acp` the parent's stdin IS the
+JSON-RPC pipe, held open by the client forever, and communicate() never returns
+-- not even the timeout=15 rescues it, the signature of a descendant keeping the
+pipes open after the child is killed.
+
+Fix, applied locally to hermes-agent/tools/environments/local.py:
+
+    stdin=subprocess.DEVNULL,
+
+Result: terminal works under ACP, and ACP streams tokens
+("\n\nIt", " printed `", "pong`.") which the CLI with -Q never could.
+
+    handshake  2.44s (once, at HUD launch)
+    question 1 1.62s to first word
+    question 2 3.02s to first word, INCLUDING a shell command round trip
+
+This affects any ACP client, since ACP always uses stdin as its transport.
+Worth reporting upstream to Nous.
+
+WARNING: `hermes update` overwrites local.py and reverts this. If the terminal
+tool starts hanging under ACP again, re-apply the one-liner. Backup of the
+original is beside it as local.py.bak.*

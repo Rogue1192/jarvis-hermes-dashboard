@@ -15,6 +15,7 @@ or
 import collections
 import json
 import os
+import random
 import re
 import shlex
 import shutil
@@ -357,6 +358,67 @@ def run_mock(message, session_id=None, system=None):
                                   f"Diagnostic: {detail[:240]}"))
 
 
+# ── retrieval guard ──────────────────────────────────────────────────────
+# The failure this exists for: asked tomorrow's weather, JARVIS answered "99,
+# mostly cloudy, no rain" without looking. The real forecast was 96, sunny, 20%
+# storms. A retrieved answer and an invented one sound identical, so the user
+# cannot tell which he got -- and a rule per topic (weather, then time, then
+# prices...) is whack-a-mole.
+#
+# The guard does not ask the model whether it looked. Tool calls arrive as
+# protocol events emitted by the runtime, so they cannot be fabricated. We watch
+# those instead.
+#
+# Questions about the current state of the world -- anything whose answer can
+# change without the model knowing.
+NEEDS_LIVE_DATA = re.compile(r"""
+    \b(?:weather|forecast|temperature|rain|snow|humidity|wind|heat\s+index)\b
+  | \b(?:what\s+time|what.s\s+the\s+time|time\s+is\s+it|today.s\s+date|what.s\s+today)\b
+  | \b(?:price|cost|quote|stock|ticker|exchange\s+rate)\b
+  | \b(?:news|headline|latest|announced|released)\b
+  | \b(?:to.?do|task|calendar|schedule|appointment|meeting|inbox|unread)\b
+  | \b(?:how\s+many|how\s+much|when\s+is|when.s|who\s+is\s+on|status\s+of)\b
+  | \b(?:my|our|casey.s)\s+(?:list|notes?|files?|clients?|accounts?|numbers?|leads?)\b
+""", re.I | re.X)
+
+# Tools that constitute actually going and looking. A tool call that is not one
+# of these (a scratch calculation, say) does not count as retrieval.
+_RETRIEVAL_HINT = re.compile(
+    r"web|search|extract|fetch|browse|read|file|terminal|shell|bash|python|"
+    r"grep|obsidian|note|todo|kanban|memory|calendar|mail|sql|query", re.I)
+
+# Spoken the instant a lookup is needed, before the model produces anything.
+# The tool round trip costs 3-5s; silence for that long reads as a hang, while
+# eight words of acknowledgement makes the same wait feel like someone checking.
+_LOOKUP_FILLER = (
+    "Let me look that up. ",
+    "One second, checking. ",
+    "Give me a sec, I'll look it up. ",
+    "Checking now. ",
+)
+# Spoken when the first pass answered from memory and we are making it go back.
+_RETRY_FILLER = (
+    "Still on it. ",
+    "One more moment, verifying that. ",
+    "Bear with me, checking properly. ",
+)
+
+_FORCE_RETRIEVAL = (
+    "\n\nYou answered that from memory without retrieving anything. The answer may "
+    "be wrong and must not be given as-is. Use your tools NOW to look up the actual "
+    "current facts, then answer from what you retrieved. If a lookup fails, say "
+    "plainly that you could not retrieve it -- do not estimate."
+)
+
+
+def needs_live_data(message):
+    return bool(NEEDS_LIVE_DATA.search(message or ""))
+
+
+def _is_retrieval(tool_name):
+    return bool(_RETRIEVAL_HINT.search(str(tool_name or "")))
+
+
 def _acp_agent():
     import acp_client
     return acp_client.get_agent(_hermes_base(), WORKDIR)
@@ -391,7 +453,59 @@ def run_acp(message, session_id=None, system=None):
     yield dict(t="status", model=MODEL or "Hermes default", tools=0, mcp=[],
                permission=PERMISSION, profile=PROFILE, runtime="hermes-acp",
                session_id=agent.session_id)
-    yield from agent.prompt(compose_prompt(message, system))
+
+    prompt = compose_prompt(message, system)
+    if not needs_live_data(message):
+        yield from agent.prompt(prompt)
+        return
+
+    # Live-data question. Say so immediately -- this is spoken while the tool
+    # round trip happens, so the pause is filled rather than silent.
+    yield dict(t="delta", text=random.choice(_LOOKUP_FILLER))
+
+    # Hold the rest until we have seen a real retrieval; text arriving with no
+    # tool call means it answered from memory.
+    # A lookup only counts once it COMPLETES. Naming a tool proves nothing -- a
+    # `python` call that imports a module and fetches nothing would otherwise
+    # score as "he looked it up". Started-but-unfinished is not evidence.
+    held, retrieved, released = [], False, False
+    pending = False
+    for ev in agent.prompt(prompt):
+        if ev.get("t") == "tool":
+            if ev.get("phase") == "use":
+                pending = _is_retrieval(ev.get("name"))
+            elif ev.get("phase") == "result" and pending and ev.get("ok"):
+                retrieved = True
+                pending = False
+        if not retrieved and ev.get("t") in ("delta", "complete"):
+            held.append(ev)            # might be an invented answer -- do not speak yet
+            continue
+        if held and retrieved and not released:
+            released = True
+            for h in held:             # it did look; release what we were holding
+                yield h
+            held = []
+        yield ev
+
+    if retrieved:
+        for h in held:
+            yield h
+        return
+
+    # Nothing was retrieved. Discard the unspoken answer and make it go look.
+    yield dict(t="note", message="answered from memory - forcing a lookup")
+    yield dict(t="delta", text=random.choice(_RETRY_FILLER))
+    pending = False
+    for ev in agent.prompt(prompt + _FORCE_RETRIEVAL):
+        if ev.get("t") == "tool":
+            if ev.get("phase") == "use":
+                pending = _is_retrieval(ev.get("name"))
+            elif ev.get("phase") == "result" and pending and ev.get("ok"):
+                retrieved = True
+                pending = False
+        yield ev
+    if not retrieved:
+        yield dict(t="note", message="RETRY ALSO DID NOT RETRIEVE - answer is unverified")
 
 
 def run(message, session_id=None, system=None):
