@@ -760,10 +760,68 @@ setInterval(async () => {
     } else if (s.wake && s.wake.enabled){
       log('error', 'WAKE', `wake word off — ${s.wake.error || 'not running'}`);
     }
-    $('#mic').textContent = RT.stt ? '◉ ElevenLabs Voice' : '◉ Browser Voice';
+    $('#mic').textContent = RT.stt ? '◉ ElevenLabs' : '◉ Voice';
     setState('', 'STANDBY', 'awaiting uplink');
   } catch(e){
     sys('gw','offline','warn');
     log('error','STATUS','server unreachable');
   }
+})();
+
+
+/* ── Drawer and tabs ───────────────────────────────────────────────────────
+   The Action Log and Command Matrix used to be two permanent columns eating
+   width the whole time. They are one drawer now: Action Log is the default
+   tab, Command Matrix is a click away, and neither costs screen space while
+   closed.
+
+   The drawer opens itself when something needs eyes -- an error, or a card
+   landing in needs-approval -- because a panel nobody opened is a panel that
+   reports nothing. */
+(function drawer(){
+  const el      = document.getElementById('drawer');
+  const toggle  = document.getElementById('drawerToggle');
+  const closeBt = document.getElementById('drawerClose');
+  if (!el || !toggle) return;
+
+  const scrim = document.createElement('div');
+  scrim.className = 'drawer-scrim';
+  document.body.appendChild(scrim);
+
+  function setOpen(open){
+    document.body.classList.toggle('drawer-open', open);
+    el.setAttribute('aria-hidden', String(!open));
+    toggle.setAttribute('aria-expanded', String(open));
+  }
+  window.jarvisDrawer = { open: () => setOpen(true), close: () => setOpen(false) };
+
+  toggle.onclick  = () => setOpen(!document.body.classList.contains('drawer-open'));
+  closeBt.onclick = () => setOpen(false);
+  scrim.onclick   = () => setOpen(false);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') setOpen(false);
+  });
+
+  const tabs  = [...el.querySelectorAll('.dtab')];
+  const panes = [...el.querySelectorAll('.pane')];
+  function show(id){
+    tabs.forEach(t => {
+      const on = t.dataset.panel === id;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', String(on));
+    });
+    panes.forEach(p => p.classList.toggle('active', p.id === id));
+    // The edge tab names whatever is showing, so it is obvious what opens.
+    const label = tabs.find(t => t.dataset.panel === id);
+    const dt = toggle.querySelector('.dt-label');
+    if (label && dt) dt.textContent = label.textContent;
+  }
+  tabs.forEach(t => t.onclick = () => show(t.dataset.panel));
+  show('pane-log');
+
+  /* Opening the drawer to reach the command grid and having to close it again
+     is a click nobody wants. Firing a command closes it. */
+  el.querySelectorAll('.cmd, .miniBtns button').forEach(b => {
+    b.addEventListener('click', () => setOpen(false));
+  });
 })();

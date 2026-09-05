@@ -15,6 +15,7 @@
 <div class="grid-bg"></div>
 <div class="ambient a1"></div><div class="ambient a2"></div>
 
+<!-- Topbar: compact lockup hard into the corner, pills inline beside it. -->
 <header class="topbar">
   <div class="sigil"><span></span></div>
   <div class="brandlock">
@@ -29,37 +30,28 @@
 </header>
 
 <div class="hud">
-  <section class="col left glass">
-    <header class="colhead">
-      <div class="h">Command<br>Matrix</div>
-      <div class="sub">Click to execute · payload commands stay armed</div>
-    </header>
-
-    <div class="cmds" id="cmds">
-      <button class="cmd" data-cmd="/new"><b>/new</b><span>Fresh thread</span></button>
-      <button class="cmd" data-cmd="/goal"><b>/goal</b><span>Standing objective</span></button>
-      <button class="cmd" data-cmd="/tools"><b>/tools</b><span>Hermes tool status</span></button>
-      <button class="cmd" data-cmd="/browser"><b>/browser</b><span>Chrome / browser op</span></button>
-      <button class="cmd" data-cmd="/background"><b>/background</b><span>Async mission</span></button>
-      <button class="cmd" data-cmd="/mission"><b>/mission</b><span>Mission queue</span></button>
-      <button class="cmd" data-cmd="/personality"><b>/personality</b><span>Voice/tone overlay</span></button>
-      <button class="cmd" data-cmd="/commands"><b>/commands</b><span>Show commands</span></button>
+  <!-- Left: the response box, tall and narrow, tucked under the wordmark. -->
+  <section class="col left">
+    <div class="response glass" id="responseWrap">
+      <div class="rhead"><span>JARVIS Response</span><span class="rtag" id="rtag">IDLE</span></div>
+      <div class="rbody" id="response"><span class="rplaceholder">Standing by. Transmit an instruction.</span></div>
     </div>
 
-    <div class="toolrack">
-      <div class="lbl">Connected Hermes Tools</div>
-      <div id="toolsList" class="chips"><span class="chip ghost">loading tool matrix…</span></div>
-    </div>
-
-    <div class="uplink">
-      <div class="lbl">Pending uplink</div>
+    <div class="uplink glass">
       <div class="field">
-        <textarea id="input" rows="4" spellcheck="false" placeholder="Speak through browser voice or type a Hermes instruction. Slash commands are supported."></textarea>
+        <textarea id="input" rows="2" spellcheck="false" placeholder="Speak, or type a Hermes instruction. Slash commands supported."></textarea>
       </div>
-      <div class="tip" id="tip">Use <b>Browser Voice</b> for local speech recognition, or server ElevenLabs if configured. Try <b>/browser</b> “open Chrome and inspect the current tab”.</div>
+      <div class="missionbar">
+        <button id="mic" class="ctl mic" title="Browser voice / microphone">◉ Voice</button>
+        <button id="run" class="ctl run" title="Send (⌘↵)">Transmit ▸</button>
+        <button id="mute" class="ctl mute on" title="Mute Jarvis speech">🔊</button>
+        <button id="clearBtn" class="ctl aux">Clear</button>
+      </div>
+      <div class="tip" id="tip">Use <b>Voice</b> for speech, or server ElevenLabs if configured.</div>
     </div>
   </section>
 
+  <!-- Centre: the core, pushed to the top so the space below is free. -->
   <section class="col center">
     <div class="reactor" id="reactor">
       <svg viewBox="0 0 520 520" id="core" aria-label="JARVIS reactor visualizer">
@@ -88,51 +80,112 @@
         <div class="strun" id="strun">awaiting uplink</div>
       </div>
     </div>
-
-    <div class="response glass" id="responseWrap">
-      <div class="rhead"><span>JARVIS Response</span><span class="rtag" id="rtag">IDLE</span></div>
-      <div class="rbody" id="response"><span class="rplaceholder">Standing by. Transmit an instruction.</span></div>
-    </div>
-
-    <div class="missionbar glass">
-      <button id="mic" class="ctl mic" title="Browser voice / microphone">◉ Browser Voice</button>
-      <button id="run" class="ctl run" title="Send (⌘↵)">Transmit to JARVIS ▸</button>
-      <button id="showCommands" class="ctl aux">Show Commands</button>
-      <button id="missionBtn" class="ctl aux">Mission Control</button>
-      <button id="mute" class="ctl mute on" title="Mute Jarvis speech">🔊</button>
-      <button id="clearBtn" class="ctl aux">Clear</button>
-    </div>
   </section>
-
-  <section class="col right glass">
-    <header class="colhead row">
-      <div class="h sm">Action Log</div>
-      <div class="live" id="live">LIVE TELEMETRY</div>
-    </header>
-
-    <div class="sysgrid">
-      <div class="sysrow"><span>Gateway</span><b id="sy-gw" class="ok">online</b></div>
-      <div class="sysrow"><span>Brain</span><b id="sy-brain">—</b></div>
-      <div class="sysrow"><span>Voice</span><b id="sy-voice">—</b></div>
-      <div class="sysrow"><span>Profile</span><b id="sy-profile">default</b></div>
-      <div class="sysrow"><span>Runtime</span><b id="sy-runtime">—</b></div>
-      <div class="sysrow"><span>Uplink</span><b id="sy-clock">—</b></div>
+  <!-- Right: today's list, synced from DashFlow. Takes over the column the
+       Action Log used to occupy, now that the log is a drawer. -->
+  <section class="col right today glass" id="todayPanel">
+    <div class="today-head">
+      <div class="h sm">Today</div>
+      <div class="today-meta"><span id="todaySource">DashFlow · not connected</span></div>
     </div>
-
-    <div class="missionPanel">
-      <div class="log-lbl">Mission controls</div>
-      <div class="miniBtns">
-        <button data-quick="/status">Status</button>
-        <button data-quick="/tools">Tools</button>
-        <button data-quick="/toolsets">Toolsets</button>
-        <button data-quick="/connectors">Connectors</button>
-      </div>
+    <div class="today-list" id="todayList">
+      <span class="chip ghost">waiting on the DashFlow connection…</span>
     </div>
-
-    <div class="log-lbl">Event stream</div>
-    <div class="log" id="log"></div>
+    <div class="today-foot">
+      <button class="ctl aux" id="todayRefresh">Refresh</button>
+      <span class="today-count" id="todayCount"></span>
+    </div>
   </section>
 </div>
+
+<!-- The board. Five columns, full width. -->
+<section class="board glass" id="boardPanel">
+  <div class="board-head">
+    <div class="lbl">Mission board</div>
+    <div class="board-meta"><span id="boardSource">kanban.db · not wired</span></div>
+  </div>
+  <div class="board-cols" id="boardCols">
+    <div class="bcol" data-status="todo"><div class="bcol-head">Todo <b id="c-todo">0</b></div><div class="bcol-body" id="col-todo"></div></div>
+    <div class="bcol" data-status="in_process"><div class="bcol-head">In process <b id="c-in_process">0</b></div><div class="bcol-body" id="col-in_process"></div></div>
+    <div class="bcol" data-status="needs_approval"><div class="bcol-head">Needs approval <b id="c-needs_approval">0</b></div><div class="bcol-body" id="col-needs_approval"></div></div>
+    <div class="bcol" data-status="final_review"><div class="bcol-head">Final review <b id="c-final_review">0</b></div><div class="bcol-body" id="col-final_review"></div></div>
+    <div class="bcol" data-status="complete"><div class="bcol-head">Complete <b id="c-complete">0</b></div><div class="bcol-body" id="col-complete"></div></div>
+  </div>
+</section>
+
+<!-- The drawer. Slides in from the right edge; Action Log is the default tab. -->
+<button class="drawer-tab" id="drawerToggle" aria-expanded="false" aria-controls="drawer">
+  <span class="dt-label">Action Log</span>
+</button>
+
+<aside class="drawer glass" id="drawer" aria-hidden="true">
+  <div class="drawer-tabs" role="tablist">
+    <button class="dtab active" role="tab" data-panel="pane-log" aria-selected="true">Action Log</button>
+    <button class="dtab" role="tab" data-panel="pane-cmd" aria-selected="false">Command Matrix</button>
+    <button class="drawer-close" id="drawerClose" title="Close">✕</button>
+  </div>
+
+  <div class="drawer-body">
+    <!-- Action Log -->
+    <div class="pane active" id="pane-log" role="tabpanel">
+      <div class="colhead row">
+        <div class="h sm">Action Log</div>
+        <div class="live" id="live">LIVE TELEMETRY</div>
+      </div>
+
+      <div class="sysgrid">
+        <div class="sysrow"><span>Gateway</span><b id="sy-gw" class="ok">online</b></div>
+        <div class="sysrow"><span>Brain</span><b id="sy-brain">—</b></div>
+        <div class="sysrow"><span>Voice</span><b id="sy-voice">—</b></div>
+        <div class="sysrow"><span>Profile</span><b id="sy-profile">default</b></div>
+        <div class="sysrow"><span>Runtime</span><b id="sy-runtime">—</b></div>
+        <div class="sysrow"><span>Uplink</span><b id="sy-clock">—</b></div>
+      </div>
+
+      <div class="missionPanel">
+        <div class="log-lbl">Mission controls</div>
+        <div class="miniBtns">
+          <button data-quick="/status">Status</button>
+          <button data-quick="/tools">Tools</button>
+          <button data-quick="/toolsets">Toolsets</button>
+          <button data-quick="/connectors">Connectors</button>
+        </div>
+      </div>
+
+      <div class="log-lbl">Event stream</div>
+      <div class="log" id="log"></div>
+    </div>
+
+    <!-- Command Matrix -->
+    <div class="pane" id="pane-cmd" role="tabpanel">
+      <div class="colhead">
+        <div class="h sm">Command Matrix</div>
+        <div class="sub">Click to execute · payload commands stay armed</div>
+      </div>
+
+      <div class="cmds" id="cmds">
+        <button class="cmd" data-cmd="/new"><b>/new</b><span>Fresh thread</span></button>
+        <button class="cmd" data-cmd="/goal"><b>/goal</b><span>Standing objective</span></button>
+        <button class="cmd" data-cmd="/tools"><b>/tools</b><span>Hermes tool status</span></button>
+        <button class="cmd" data-cmd="/browser"><b>/browser</b><span>Chrome / browser op</span></button>
+        <button class="cmd" data-cmd="/background"><b>/background</b><span>Async mission</span></button>
+        <button class="cmd" data-cmd="/mission"><b>/mission</b><span>Mission queue</span></button>
+        <button class="cmd" data-cmd="/personality"><b>/personality</b><span>Voice/tone overlay</span></button>
+        <button class="cmd" data-cmd="/commands"><b>/commands</b><span>Show commands</span></button>
+      </div>
+
+      <div class="toolrack">
+        <div class="lbl">Connected Hermes Tools</div>
+        <div id="toolsList" class="chips"><span class="chip ghost">loading tool matrix…</span></div>
+      </div>
+
+      <div class="aux-row">
+        <button id="showCommands" class="ctl aux">Show Commands</button>
+        <button id="missionBtn" class="ctl aux">Mission Control</button>
+      </div>
+    </div>
+  </div>
+</aside>
 
 <div class="brandmark">HERMES · JARVIS OS</div>
 <script src="app.js"></script>
