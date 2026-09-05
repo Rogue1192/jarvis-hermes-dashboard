@@ -29,6 +29,13 @@ MCP_URL = "https://app.get-dashflow.com/mcp"
 # entitled to reject a request without it, and the rejection is a 4xx that
 # looks exactly like an auth failure -- which is how it cost an hour once.
 PROTOCOL_VERSION = "2025-06-18"
+
+# urllib announces itself as "Python-urllib/3.x", which edge bot filters drop
+# before the request ever reaches the application. DashFlow is hosted on
+# Lovable, and that is exactly what happened: a 403 carrying a Lovable HTML
+# error page rather than anything from the MCP server. Hermes gets through
+# because its HTTP client sends an ordinary agent string.
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) JarvisHUD/1.0 (MCP client)"
 _LOCK = threading.Lock()
 _SESSION = {"id": None}
 
@@ -62,6 +69,7 @@ def _post_json(url, payload, headers=None, form=False):
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Content-Type", ctype)
     req.add_header("Accept", "application/json, text/event-stream")
+    req.add_header("User-Agent", USER_AGENT)
     for k, v in (headers or {}).items():
         req.add_header(k, v)
     with urllib.request.urlopen(req, timeout=20) as r:
@@ -116,6 +124,21 @@ def _token():
         elif float(tok.get("expires_at") or 0) <= time.time():
             return None, "DashFlow authorisation expired. Run: hermes mcp login dashflow"
     return tok["access_token"], None
+
+
+def _readable(body, limit=160):
+    """Turn whatever came back into one line worth reading.
+
+    A hosting layer answers with an HTML page; quoting its doctype at someone
+    tells them nothing. Strip the tags and keep the sentence."""
+    body = (body or "").strip()
+    if body.lower().startswith("<!doctype") or body.lower().startswith("<html"):
+        import re as _re
+        text = _re.sub(r"(?is)<(script|style|head).*?</\1>", " ", body)
+        text = _re.sub(r"(?s)<[^>]+>", " ", text)
+        text = " ".join(text.split())
+        return (text[:limit] or "an HTML error page, not an MCP response")
+    return body[:limit]
 
 
 def _parse(body):
@@ -190,7 +213,7 @@ def call_tool(name, arguments=None):
             _SESSION["id"] = None
             detail = ""
             try:
-                detail = e.read().decode("utf-8", "replace")[:180]
+                detail = _readable(e.read().decode("utf-8", "replace"))
             except Exception:                                 # noqa: BLE001
                 pass
             if e.code in (401, 403):
