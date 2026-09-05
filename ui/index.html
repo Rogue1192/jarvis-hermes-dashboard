@@ -32,22 +32,24 @@
 <div class="hud">
   <!-- Left: the response box, tall and narrow, tucked under the wordmark. -->
   <section class="col left">
+    <!-- One panel: what he said on top, what you say to him along the bottom.
+         Two boxes made the reply and the reply-to look like separate tools. -->
     <div class="response glass" id="responseWrap">
       <div class="rhead"><span>JARVIS Response</span><span class="rtag" id="rtag">IDLE</span></div>
       <div class="rbody" id="response"><span class="rplaceholder">Standing by. Transmit an instruction.</span></div>
-    </div>
 
-    <div class="uplink glass">
-      <div class="field">
-        <textarea id="input" rows="2" spellcheck="false" placeholder="Speak, or type a Hermes instruction. Slash commands supported."></textarea>
+      <div class="uplink">
+        <div class="field">
+          <textarea id="input" rows="2" spellcheck="false" placeholder="Speak, or type a Hermes instruction. Slash commands supported."></textarea>
+        </div>
+        <div class="missionbar">
+          <button id="mic" class="ctl mic" title="Browser voice / microphone">◉ Voice</button>
+          <button id="run" class="ctl run" title="Send (⌘↵)">Transmit ▸</button>
+          <button id="mute" class="ctl mute on" title="Mute Jarvis speech">🔊</button>
+          <button id="clearBtn" class="ctl aux">Clear</button>
+        </div>
+        <div class="tip" id="tip">Use <b>Voice</b> for speech, or server ElevenLabs if configured.</div>
       </div>
-      <div class="missionbar">
-        <button id="mic" class="ctl mic" title="Browser voice / microphone">◉ Voice</button>
-        <button id="run" class="ctl run" title="Send (⌘↵)">Transmit ▸</button>
-        <button id="mute" class="ctl mute on" title="Mute Jarvis speech">🔊</button>
-        <button id="clearBtn" class="ctl aux">Clear</button>
-      </div>
-      <div class="tip" id="tip">Use <b>Voice</b> for speech, or server ElevenLabs if configured.</div>
     </div>
   </section>
 
