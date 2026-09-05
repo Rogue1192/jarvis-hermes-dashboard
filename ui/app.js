@@ -1082,7 +1082,11 @@ setInterval(async () => {
   const panel = $$('todayPanel');
   if (!panel) return;
 
-  let view = 'board', col = 0, lists = [], picked = [], tasks = [];
+  // Board opens on Today, not Backlog. The board exists to answer "what am I
+  // doing now"; opening on the pile of everything not started answers the
+  // opposite question.
+  const TODAY_COL = COLS.findIndex(c => c.key === 'today');
+  let view = 'board', col = TODAY_COL, lists = [], picked = [], tasks = [];
   let openSubs = {};                        // task id -> subtask rows
   let calCursor = new Date(); calCursor.setDate(1);
   let calSel = iso(new Date()), calTasks = [];
