@@ -87,14 +87,22 @@
        Action Log used to occupy, now that the log is a drawer. -->
   <section class="col right today glass" id="todayPanel">
     <div class="today-head">
-      <div class="h sm">Today</div>
-      <div class="today-meta"><span id="todaySource">DashFlow · not connected</span></div>
+      <div class="colnav">
+        <button class="navarrow" id="colPrev" title="Previous column">‹</button>
+        <div class="h sm" id="colName">Today</div>
+        <button class="navarrow" id="colNext" title="Next column">›</button>
+      </div>
+      <div class="today-meta"><span id="todaySource"></span></div>
     </div>
+
+    <div class="listpills" id="listPills"></div>
+
     <div class="today-list" id="todayList">
-      <span class="chip ghost">waiting on the DashFlow connection…</span>
+      <span class="chip ghost">connecting to DashFlow…</span>
     </div>
+
     <div class="today-foot">
-      <button class="ctl aux" id="todayRefresh">Refresh</button>
+      <input id="todayAdd" placeholder="Add a task…" spellcheck="false">
       <span class="today-count" id="todayCount"></span>
     </div>
   </section>

@@ -19,7 +19,7 @@ import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 # Windows defaults stdout to the cp1252 code page. Redirect that to a file and
 # any non-ASCII character in our own output kills the process on startup. Ask for
@@ -43,7 +43,8 @@ if _env.exists():
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 import commands
-import board         # noqa: E402
+import board
+import dashflow         # noqa: E402
 import runtime          # noqa: E402
 import voice            # noqa: E402
 import wake             # noqa: E402
@@ -169,6 +170,13 @@ class Handler(BaseHTTPRequestHandler):
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
             return self._json(board.snapshot())
+        if p == "/api/dashflow":
+            if not self._token_ok():
+                return self._json({"error": "unauthorized"}, 401)
+            q = parse_qs(urlparse(self.path).query)
+            return self._json(dashflow.snapshot(
+                list_id=(q.get("list_id") or [None])[0],
+                status=(q.get("status") or ["today"])[0]))
         if p == "/api/board/archive":
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
@@ -209,7 +217,8 @@ class Handler(BaseHTTPRequestHandler):
         ctype = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
         if p in {"/api/run", "/api/speak", "/api/new", "/api/cancel", "/api/wake"} and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
-        if p in {"/api/board/decide", "/api/board/archive", "/api/board/unarchive"} \
+        if p in {"/api/board/decide", "/api/board/archive", "/api/board/unarchive",
+                 "/api/dashflow/complete", "/api/dashflow/add"} \
                 and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
         if p == "/api/listen" and not ctype.startswith("audio/"):
@@ -250,6 +259,21 @@ class Handler(BaseHTTPRequestHandler):
             res = board.decide(task_id=str(body.get("task_id") or ""),
                                verdict=str(body.get("verdict") or ""),
                                note=body.get("note"))
+            return self._json(res, 200 if res.get("ok") else 400)
+
+        if p in {"/api/dashflow/complete", "/api/dashflow/add"}:
+            try:
+                body = json.loads(raw or b"{}")
+            except json.JSONDecodeError:
+                return self._json({"error": "bad json"}, 400)
+            if p.endswith("/complete"):
+                res = dashflow.complete(str(body.get("task_id") or ""))
+            else:
+                res = dashflow.add(
+                    title=str(body.get("title") or "").strip(),
+                    list_id=body.get("list_id"),
+                    status=body.get("status") or "today",
+                    estimate_minutes=body.get("estimate_minutes"))
             return self._json(res, 200 if res.get("ok") else 400)
 
         if p in {"/api/board/archive", "/api/board/unarchive"}:

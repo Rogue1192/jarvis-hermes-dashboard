@@ -1061,3 +1061,130 @@ setInterval(async () => {
   setInterval(load, 15000);
   window.jarvisBoard = { reload: load };
 })();
+
+/* ── Today, from DashFlow ──────────────────────────────────────────────────
+   Reads through the same MCP tools JARVIS has, so what is on screen and what
+   he can act on are the same thing by construction.
+
+   Defaults to the Today column because that is what the app itself does; the
+   arrows walk the other three, and the pills filter by list. */
+(function today(){
+  const COLS = [
+    {key:'backlog',    label:'Backlog'},
+    {key:'this_week',  label:'This Week'},
+    {key:'today',      label:'Today'},
+    {key:'done',       label:'Done'},
+  ];
+  const listEl  = document.getElementById('todayList');
+  const pillsEl = document.getElementById('listPills');
+  const nameEl  = document.getElementById('colName');
+  const srcEl   = document.getElementById('todaySource');
+  const countEl = document.getElementById('todayCount');
+  const addEl   = document.getElementById('todayAdd');
+  if (!listEl) return;
+
+  let col = 2;              // Today
+  let listId = null;        // null = all lists
+  let lists = [];
+
+  const mins = n => {
+    if (!n) return '';
+    const h = Math.floor(n / 60), m = n % 60;
+    return h ? (m ? `${h}hr ${m}min` : `${h}hr`) : `${m}min`;
+  };
+
+  function drawPills(){
+    pillsEl.innerHTML =
+      `<button class="lpill ${listId===null?'on':''}" data-list="">All lists</button>`
+      + lists.map(l => `<button class="lpill ${listId===l.id?'on':''}" data-list="${esc(l.id)}">${esc(l.title || l.name || 'Untitled')}</button>`).join('');
+    pillsEl.querySelectorAll('.lpill').forEach(b => b.onclick = () => {
+      listId = b.dataset.list || null;
+      load();
+    });
+  }
+
+  async function load(){
+    nameEl.textContent = COLS[col].label;
+    const qs = new URLSearchParams({status: COLS[col].key});
+    if (listId) qs.set('list_id', listId);
+    try {
+      const r = await fetch('/api/dashflow?' + qs, {headers: apiHeaders()});
+      const b = await r.json();
+
+      if (Array.isArray(b.lists) && b.lists.length){ lists = b.lists; drawPills(); }
+
+      if (!b.ok){
+        // Say what is wrong and what fixes it. "Not connected" with no next
+        // step is the same as saying nothing.
+        srcEl.textContent = '';
+        countEl.textContent = '';
+        listEl.innerHTML = `<div class="today-problem">${esc(b.error || 'DashFlow unavailable')}</div>`;
+        return;
+      }
+
+      const tasks = b.tasks || [];
+      const open  = tasks.filter(t => !t.is_done && t.status !== 'done');
+      const total = tasks.reduce((n,t) => n + (t.estimate_minutes || 0), 0);
+
+      srcEl.textContent = '';
+      countEl.textContent = tasks.length
+        ? `${open.length} open${total ? ' · ' + mins(total) : ''}`
+        : '';
+
+      if (!tasks.length){
+        listEl.innerHTML = `<div class="today-problem" style="color:var(--dim)">Nothing in ${esc(COLS[col].label)}.</div>`;
+        return;
+      }
+
+      listEl.innerHTML = tasks.map(t => {
+        const done = t.is_done || t.status === 'done';
+        const listName = (lists.find(l => l.id === t.list_id) || {});
+        return `<button class="todo ${done?'done':''}" data-id="${esc(t.id)}">`
+             + `<span class="box"></span>`
+             + `<span class="txt">${esc(t.title || '(untitled)')}</span>`
+             + (listName.title ? `<span class="tag">${esc(listName.title)}</span>` : '')
+             + (t.estimate_minutes ? `<span class="est">${mins(t.estimate_minutes)}</span>` : '')
+             + `</button>`;
+      }).join('');
+
+      listEl.querySelectorAll('.todo').forEach(el => {
+        el.onclick = async () => {
+          if (el.classList.contains('done')) return;
+          el.classList.add('done');                 // optimistic; load() corrects it
+          const r = await fetch('/api/dashflow/complete', {
+            method:'POST', headers: apiHeaders({'content-type':'application/json'}),
+            body: JSON.stringify({task_id: el.dataset.id})
+          });
+          const b = await r.json().catch(()=>({}));
+          if (!b.ok){ el.classList.remove('done'); alert(b.error || 'could not complete that'); }
+          else log('complete','DASHFLOW', `done — ${el.querySelector('.txt').textContent}`);
+          load();
+        };
+      });
+    } catch(e){
+      listEl.innerHTML = '<div class="today-problem">DashFlow panel unreachable.</div>';
+    }
+  }
+
+  document.getElementById('colPrev').onclick = () => { col = (col + COLS.length - 1) % COLS.length; load(); };
+  document.getElementById('colNext').onclick = () => { col = (col + 1) % COLS.length; load(); };
+
+  addEl.onkeydown = async e => {
+    if (e.key !== 'Enter') return;
+    const title = addEl.value.trim();
+    if (!title) return;
+    addEl.value = '';
+    const r = await fetch('/api/dashflow/add', {
+      method:'POST', headers: apiHeaders({'content-type':'application/json'}),
+      body: JSON.stringify({title, list_id: listId, status: COLS[col].key})
+    });
+    const b = await r.json().catch(()=>({}));
+    if (!b.ok) alert(b.error || 'could not add that');
+    else log('send','DASHFLOW', `added — ${title}`);
+    load();
+  };
+
+  load();
+  setInterval(load, 30000);
+  window.jarvisToday = { reload: load };
+})();

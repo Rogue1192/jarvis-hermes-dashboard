@@ -154,3 +154,19 @@ body.drawer-open .drawer-scrim{opacity:1;pointer-events:auto}
 .board-problem{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber)}
 .board-problem:empty{display:none}
 .board-meta .selall{padding-right:2px}
+
+/* Today — DashFlow. Defaults to the Today column, arrows to the others,
+   pills to filter by list. Same tools JARVIS uses, so voice and screen
+   cannot drift apart. */
+.colnav{display:flex;align-items:center;gap:8px}
+.navarrow{cursor:pointer;border:1px solid var(--edge);border-radius:9px;background:rgba(5,18,28,.7);color:var(--cyan);font-size:15px;line-height:1;padding:3px 9px;transition:.16s}
+.navarrow:hover{border-color:var(--edge-2);box-shadow:0 0 18px rgba(64,243,255,.16)}
+.listpills{flex:0 0 auto;display:flex;gap:6px;overflow-x:auto;padding-bottom:3px}
+.lpill{cursor:pointer;flex:0 0 auto;border:1px solid rgba(64,243,255,.18);border-radius:999px;background:rgba(5,18,28,.7);color:var(--mut);font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;padding:6px 11px;transition:.16s;white-space:nowrap}
+.lpill:hover{color:var(--ink);border-color:var(--edge-2)}
+.lpill.on{color:var(--cyan);background:rgba(64,243,255,.11);border-color:var(--edge-2)}
+.today-foot #todayAdd{flex:1;min-width:0;background:rgba(3,14,22,.72);border:1px solid var(--edge);border-radius:12px;color:var(--ink);font-family:var(--mono);font-size:11px;padding:9px 12px;outline:0}
+.today-foot #todayAdd:focus{border-color:var(--cyan);box-shadow:0 0 22px rgba(64,243,255,.15)}
+.todo .est{margin-left:auto}
+.todo .tag{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--cyan2);border:1px solid rgba(64,243,255,.2);border-radius:999px;padding:2px 7px;flex:0 0 auto}
+.today-problem{font-family:var(--mono);font-size:10px;line-height:1.6;color:var(--amber);padding:14px 2px}
