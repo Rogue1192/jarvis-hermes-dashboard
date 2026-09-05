@@ -169,6 +169,10 @@ class Handler(BaseHTTPRequestHandler):
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
             return self._json(board.snapshot())
+        if p == "/api/board/archive":
+            if not self._token_ok():
+                return self._json({"error": "unauthorized"}, 401)
+            return self._json(board.archived_cards())
         if p.startswith("/api/board/attachment/"):
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
@@ -205,7 +209,8 @@ class Handler(BaseHTTPRequestHandler):
         ctype = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
         if p in {"/api/run", "/api/speak", "/api/new", "/api/cancel", "/api/wake"} and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
-        if p == "/api/board/decide" and ctype != "application/json":
+        if p in {"/api/board/decide", "/api/board/archive", "/api/board/unarchive"} \
+                and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
         if p == "/api/listen" and not ctype.startswith("audio/"):
             return self._json({"error": "audio content type required"}, 415)
@@ -245,6 +250,16 @@ class Handler(BaseHTTPRequestHandler):
             res = board.decide(task_id=str(body.get("task_id") or ""),
                                verdict=str(body.get("verdict") or ""),
                                note=body.get("note"))
+            return self._json(res, 200 if res.get("ok") else 400)
+
+        if p in {"/api/board/archive", "/api/board/unarchive"}:
+            try:
+                body = json.loads(raw or b"{}")
+            except json.JSONDecodeError:
+                return self._json({"error": "bad json"}, 400)
+            ids = body.get("task_ids") or []
+            fn = board.archive if p.endswith("/archive") else board.unarchive
+            res = fn(ids)
             return self._json(res, 200 if res.get("ok") else 400)
 
         if p == "/api/new":

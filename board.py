@@ -28,6 +28,13 @@ import time
 # strings the board writes; nothing here needs a migration.
 COLUMNS = ["todo", "in_process", "needs_approval", "final_review", "complete"]
 
+# Archived cards are not deleted and not a sixth column. They keep their
+# comments, attachments and event history -- the record of what was approved
+# and why is the only reason any of this is worth keeping -- they simply stop
+# crowding the Complete column. `status` is free text, so this costs no schema
+# change and nothing else in Hermes has to know about it.
+ARCHIVED = "archived"
+
 # Anything not one of ours still has to land somewhere visible -- a task Hermes
 # created with its own vocabulary should not silently vanish from the board.
 _ALIASES = {
@@ -65,7 +72,14 @@ def _connect():
 
 
 def column_for(status) -> str:
+    """Which column a status belongs in, or None when it belongs in none.
+
+    Unknown statuses fall to todo rather than vanishing: a task Hermes created
+    with its own vocabulary should show up somewhere a person will see it.
+    Archived is the one status that deliberately shows nowhere."""
     s = (status or "").strip().lower().replace(" ", "_")
+    if s == ARCHIVED:
+        return None
     if s in COLUMNS:
         return s
     return _ALIASES.get(s, "todo")
@@ -147,6 +161,9 @@ def snapshot():
 
     out = {c: [] for c in COLUMNS}
     for r in rows:
+        col = column_for(r["status"])
+        if col is None:
+            continue
         atts = _attachments(con, r["id"])
         skills = r["skills"]
         try:
@@ -164,9 +181,14 @@ def snapshot():
             preview=_preview_for(r, atts),
             created_at=r["created_at"],
         )
-        out[column_for(r["status"])].append(card)
+        out[col].append(card)
+    archived = con.execute(
+        "select count(*) from tasks where lower(coalesce(status,''))=?",
+        (ARCHIVED,)).fetchone()[0]
     con.close()
-    return dict(ok=True, columns=out, counts={c: len(v) for c, v in out.items()})
+    return dict(ok=True, columns=out,
+                counts={c: len(v) for c, v in out.items()},
+                archived=archived)
 
 
 def _event(con, task_id, kind, payload):
@@ -251,3 +273,97 @@ def attachment(attachment_id):
     return (p.read_bytes(),
             r["content_type"] or "application/octet-stream",
             r["filename"])
+
+
+def archive(task_ids, author="casey"):
+    """Move finished cards out of Complete without losing them.
+
+    Only from `complete`. Archiving something still in flight would hide live
+    work behind a button nobody opens, which is a worse failure than a cluttered
+    column -- so a card that is not complete is refused and named, rather than
+    skipped quietly.
+    """
+    ids = [str(t) for t in (task_ids or []) if str(t).strip()]
+    if not ids:
+        return dict(ok=False, error="nothing selected")
+
+    con = _connect()
+    if con is None:
+        return dict(ok=False, error="kanban.db not found at %s" % db_path())
+
+    done, refused = [], []
+    for tid in ids:
+        row = con.execute("select id, status from tasks where id=?", (tid,)).fetchone()
+        if row is None:
+            refused.append(dict(id=tid, why="no such card"))
+            continue
+        if column_for(row["status"]) != "complete":
+            refused.append(dict(id=tid, why="not complete — it is in %s"
+                                % (column_for(row["status"]) or "archived")))
+            continue
+        try:
+            con.execute("update tasks set status=? where id=?", (ARCHIVED, tid))
+            _event(con, tid, "archived", dict(by=author))
+            done.append(tid)
+        except sqlite3.Error as e:
+            refused.append(dict(id=tid, why=str(e)))
+    con.commit()
+    con.close()
+    return dict(ok=bool(done), archived=done, refused=refused)
+
+
+def unarchive(task_ids, author="casey"):
+    """Back to Complete, where it was before."""
+    ids = [str(t) for t in (task_ids or []) if str(t).strip()]
+    if not ids:
+        return dict(ok=False, error="nothing selected")
+    con = _connect()
+    if con is None:
+        return dict(ok=False, error="kanban.db not found at %s" % db_path())
+    done = []
+    for tid in ids:
+        try:
+            cur = con.execute(
+                "update tasks set status='complete' where id=? and lower(coalesce(status,''))=?",
+                (tid, ARCHIVED))
+            if cur.rowcount:
+                _event(con, tid, "unarchived", dict(by=author))
+                done.append(tid)
+        except sqlite3.Error:
+            pass
+    con.commit()
+    con.close()
+    return dict(ok=bool(done), restored=done)
+
+
+def archived_cards():
+    """What is in the archive, newest first."""
+    con = _connect()
+    if con is None:
+        return dict(ok=False, error="kanban.db not found at %s" % db_path(), cards=[])
+    try:
+        rows = con.execute(
+            "select id, title, body, assignee, status, tenant, project_id, skills, "
+            "result, completed_at, created_at from tasks "
+            "where lower(coalesce(status,''))=? "
+            "order by coalesce(completed_at, created_at, 0) desc", (ARCHIVED,)).fetchall()
+    except sqlite3.Error as e:
+        con.close()
+        return dict(ok=False, error=str(e), cards=[])
+
+    cards = []
+    for r in rows:
+        atts = _attachments(con, r["id"])
+        skills = r["skills"]
+        try:
+            skills = json.loads(skills) if skills else []
+        except (ValueError, TypeError):
+            skills = []
+        cards.append(dict(
+            id=r["id"], title=r["title"] or "(untitled)",
+            client=r["tenant"] or r["project_id"] or None,
+            agent=(skills[0] if skills else None) or r["assignee"] or None,
+            preview=_preview_for(r, atts),
+            completed_at=r["completed_at"] or r["created_at"]))
+    con.close()
+    return dict(ok=True, cards=cards)

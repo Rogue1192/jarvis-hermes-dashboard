@@ -937,7 +937,7 @@ setInterval(async () => {
     bad.onclick = () => decide(card.id, 'reject', note());
   }
 
-  function cardHtml(c){
+  function cardHtml(c, pickable){
     const meta = [];
     if (c.agent)  meta.push(`<span class="kind">${esc(c.agent)}</span>`);
     if (c.client) meta.push(`<span class="client">${esc(c.client)}</span>`);
@@ -946,7 +946,10 @@ setInterval(async () => {
     if (k === 'video') meta.push('<span>video</span>');
     if (k === 'url')   meta.push('<span>staging</span>');
     if (k === 'none')  meta.push('<span class="nope">nothing to view</span>');
-    return `<div class="card" data-id="${esc(c.id)}"><div class="ct">${esc(c.title)}</div>`
+    const title = pickable
+      ? `<div class="pick"><input type="checkbox" class="cpick" data-id="${esc(c.id)}"><div class="ct">${esc(c.title)}</div></div>`
+      : `<div class="ct">${esc(c.title)}</div>`;
+    return `<div class="card" data-id="${esc(c.id)}">${title}`
          + (meta.length ? `<div class="cm">${meta.join('')}</div>` : '') + `</div>`;
   }
 
@@ -962,17 +965,97 @@ setInterval(async () => {
         const items = b.columns[col] || [];
         items.forEach(c => cache[c.id] = c);
         total += items.length;
-        document.getElementById('col-' + col).innerHTML = items.map(cardHtml).join('');
+        document.getElementById('col-' + col).innerHTML =
+          items.map(c => cardHtml(c, col === 'complete')).join('');
         document.getElementById('c-' + col).textContent = items.length;
       }
       src.textContent = total ? `kanban.db · ${total} card${total===1?'':'s'}` : 'kanban.db · empty';
       document.querySelectorAll('.bcol-body .card').forEach(el => {
-        el.onclick = () => { const c = cache[el.dataset.id]; if (c) openCard(c); };
+        el.onclick = e => {
+          // The checkbox is for selecting, not for opening. Let it be itself.
+          if (e.target.classList.contains('cpick')) return;
+          const c = cache[el.dataset.id]; if (c) openCard(c);
+        };
       });
+      wirePicks();
+      const n = b.archived || 0;
+      archCount.textContent = n ? `(${n})` : '';
     } catch(e){
       src.textContent = 'board unreachable';
     }
   }
+
+  /* ── Archive ────────────────────────────────────────────────────────────
+     Complete fills up and stops being readable, but deleting the record of
+     what was approved would throw away the only evidence of what shipped and
+     why. So archiving is a status change: the card keeps its comments,
+     attachments and history, and comes back if it is needed. */
+  const archiveBtn = document.getElementById('archiveBtn');
+  const selAll     = document.getElementById('selAllComplete');
+  const archCount  = document.getElementById('archiveCount');
+  const viewArch   = document.getElementById('viewArchive');
+
+  function picked(){
+    return [...document.querySelectorAll('#col-complete .cpick:checked')].map(i => i.dataset.id);
+  }
+  function syncPickUi(){
+    const boxes = [...document.querySelectorAll('#col-complete .cpick')];
+    const on = picked();
+    archiveBtn.disabled = on.length === 0;
+    archiveBtn.textContent = on.length ? `Archive ${on.length}` : 'Archive';
+    selAll.checked = boxes.length > 0 && on.length === boxes.length;
+    boxes.forEach(b => b.closest('.card').classList.toggle('picked', b.checked));
+  }
+  function wirePicks(){
+    document.querySelectorAll('#col-complete .cpick').forEach(b => {
+      b.onchange = syncPickUi;
+    });
+    syncPickUi();
+  }
+  selAll.onchange = () => {
+    document.querySelectorAll('#col-complete .cpick').forEach(b => b.checked = selAll.checked);
+    syncPickUi();
+  };
+  archiveBtn.onclick = async () => {
+    const ids = picked();
+    if (!ids.length) return;
+    const r = await fetch('/api/board/archive', {
+      method:'POST', headers: apiHeaders({'content-type':'application/json'}),
+      body: JSON.stringify({task_ids: ids})
+    });
+    const b = await r.json().catch(()=>({}));
+    if (!r.ok || !b.ok){ alert(b.error || 'could not archive'); return; }
+    log('complete','BOARD', `archived ${b.archived.length} card${b.archived.length===1?'':'s'}`);
+    if ((b.refused || []).length) alert(b.refused.map(x => `${x.id}: ${x.why}`).join('\n'));
+    selAll.checked = false;
+    load();
+  };
+
+  viewArch.onclick = async () => {
+    title.textContent = 'Archive';
+    stage.innerHTML = '<div class="lb-blocked">loading…</div>';
+    verdictRow.innerHTML = '';
+    box.classList.add('open');
+    const r = await fetch('/api/board/archive', {headers: apiHeaders()});
+    const b = await r.json().catch(()=>({}));
+    if (!b.ok){ stage.innerHTML = `<div class="lb-blocked">${esc(b.error||'archive unavailable')}</div>`; return; }
+    if (!b.cards.length){ stage.innerHTML = '<div class="arch-empty">Nothing archived yet.</div>'; return; }
+    stage.innerHTML = '<div class="arch-list">' + b.cards.map(c =>
+      `<div class="arch-row"><div class="at">${esc(c.title)}</div>`
+      + `<div class="am">${esc(c.client || '')}</div>`
+      + `<button class="ctl aux" data-restore="${esc(c.id)}">Restore</button></div>`).join('') + '</div>';
+    stage.querySelectorAll('[data-restore]').forEach(btn => {
+      btn.onclick = async () => {
+        await fetch('/api/board/unarchive', {
+          method:'POST', headers: apiHeaders({'content-type':'application/json'}),
+          body: JSON.stringify({task_ids:[btn.dataset.restore]})
+        });
+        log('status','BOARD', `restored ${btn.dataset.restore}`);
+        btn.closest('.arch-row').remove();
+        load();
+      };
+    });
+  };
 
   load();
   setInterval(load, 15000);
