@@ -25,8 +25,14 @@ def voice_id():
     return os.environ.get("ELEVENLABS_VOICE_ID", DEFAULT_VOICE)
 
 
-def speak(text):
-    """Returns mp3 bytes, or raises. Caller decides what to do on failure."""
+def speak(text, previous=None):
+    """Returns mp3 bytes, or raises. Caller decides what to do on failure.
+
+    ``previous`` is the text spoken immediately before this chunk. The HUD now
+    speaks a long answer sentence by sentence while the rest is still being
+    generated, and ElevenLabs uses previous_text to carry intonation across the
+    seam so the chunks sound like one sentence instead of two takes.
+    """
     if not available():
         raise RuntimeError("no ELEVENLABS_API_KEY")
     text = (text or "").strip()
@@ -38,6 +44,7 @@ def speak(text):
         data=json.dumps({
             "text": text[:2500],
             "model_id": MODEL,
+            **({"previous_text": previous[-600:]} if (previous or "").strip() else {}),
             "voice_settings": {
                 "stability": 0.42,          # a little variation; 0.5+ goes flat
                 "similarity_boost": 0.85,
@@ -76,6 +83,12 @@ def transcribe(audio, mime="audio/webm"):
     body = b"".join([
         b"--", b, b"\r\n",
         b'Content-Disposition: form-data; name="model_id"\r\n\r\nscribe_v1\r\n',
+        # Scribe otherwise annotates non-speech as "(silence)", "(laughter)",
+        # "(footsteps)". The HUD auto-sends whatever comes back, so a tag from a
+        # quiet room became a prompt and JARVIS answered nobody. We want words
+        # only; an empty transcript is the correct answer to an empty room.
+        b"--", b, b"\r\n",
+        b'Content-Disposition: form-data; name="tag_audio_events"\r\n\r\nfalse\r\n',
         b"--", b, b"\r\n",
         f'Content-Disposition: form-data; name="file"; filename="turn.{ext}"\r\n'.encode(),
         f"Content-Type: {mime}\r\n\r\n".encode(),

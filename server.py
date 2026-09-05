@@ -8,6 +8,7 @@ configured tools, browser/Chrome automation, MCP servers, skills, memory, and
 third-party integrations that your normal Hermes sessions have. Voice can use the
 browser Web Speech API, with optional server-side ElevenLabs STT/TTS if present.
 """
+import datetime
 import json
 import mimetypes
 import os
@@ -58,13 +59,33 @@ MAX_AUDIO_BODY = 12 * 1024 * 1024
 _PERSONA_FILE = ROOT / "persona.md"
 
 
+def _now_line():
+    """The wall clock, stated plainly.
+
+    Hermes' system prompt carries the DATE but deliberately no time of day --
+    it is kept byte-stable so the prompt cache survives the whole day, and the
+    prompt itself tells the model to "query tools for exact time". Over voice
+    that is the wrong trade: either the model burns a whole extra round trip
+    shelling out to `date`, or -- with no terminal toolset loaded -- it simply
+    guesses, which is how JARVIS confidently reported 2pm at 5:39pm. This rides
+    in the per-turn user text, not the cached system prefix, so it costs one
+    line and invalidates nothing.
+    """
+    now = datetime.datetime.now().astimezone()
+    return ("Right now it is "
+            f"{now.strftime('%-I:%M %p').lower() if os.name != 'nt' else now.strftime('%I:%M %p').lstrip('0').lower()}"
+            f" on {now.strftime('%A, %B %-d, %Y') if os.name != 'nt' else now.strftime('%A, %B %d, %Y')}"
+            f" ({now.strftime('%Z')}). Use this for anything time-related; do not "
+            "estimate the time and do not run a command to look it up.")
+
+
 def persona():
     try:
         base = _PERSONA_FILE.read_text(encoding="utf-8").strip()
     except OSError:
         base = ""
     extra = commands.context_block()      # profile / goal / personality / queue
-    return "\n\n".join(x for x in (base, extra) if x)
+    return "\n\n".join(x for x in (base, extra, _now_line()) if x)
 # One continuing Hermes conversation until the user hits /new.
 SESSION = {"id": None}
 
@@ -180,8 +201,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if p == "/api/speak":
             try:
-                text = (json.loads(raw or b"{}").get("text") or "").strip()
-                return self._bytes(voice.speak(text), "audio/mpeg")
+                body = json.loads(raw or b"{}")
+                text = (body.get("text") or "").strip()
+                prev = (body.get("previous") or "").strip() or None
+                return self._bytes(voice.speak(text, prev), "audio/mpeg")
             except Exception as e:                        # noqa: BLE001
                 return self._json({"error": str(e)[:200]}, 503)
 
@@ -421,6 +444,9 @@ def main():
                                    else f"unavailable - {st.get('error') or 'unknown'}"),
               flush=True)
 
+    # Boot the resident Hermes in the background while the HUD finishes coming
+    # up, so the FIRST question is warm too rather than paying for the handshake.
+    threading.Thread(target=runtime.warm, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     if os.environ.get("JARVIS_OPEN", "1") != "0":
         threading.Thread(target=_open_window, daemon=True).start()

@@ -39,6 +39,20 @@ IDLE_TIMEOUT = int(os.environ.get("JARVIS_TIMEOUT", "120"))
 # Raw transcripts can contain private prompts. Logging is off by default.
 RAW_LOG = os.environ.get("JARVIS_RAW_LOG", "").strip()
 TOOLSETS = os.environ.get("HERMES_TOOLSETS", "").strip()
+# Reasoning depth for voice turns only. Unset means Hermes uses
+# agent.reasoning_effort from config.yaml (medium), which is more
+# deliberation than "what is on my calendar" needs and costs seconds
+# of latency on every question. Levels: none, minimal, low, medium, high.
+REASONING = os.environ.get("JARVIS_REASONING", "").strip()
+# Resident Hermes over ACP instead of a fresh subprocess per question.
+# Off unless asked for; any failure falls back to the subprocess path.
+ACP_ENABLED = os.environ.get("JARVIS_ACP", "").strip().lower() in {"1","true","yes","on"}
+# -Q is "quiet mode for programmatic use ... only output the final response".
+# That is why voice never streamed: first token and last token arrive in the
+# same instant, so sentence-by-sentence speech has nothing to start on.
+# Dropping it lets tokens arrive as they are generated. -q alone still
+# answers-and-exits on a non-TTY, which a pipe is.
+STREAM_CLI = os.environ.get("JARVIS_STREAM", "").strip().lower() in {"1","true","yes","on"}
 
 # One Hermes subprocess at a time. Hermes session state and profile resources are
 # shared, so foreground runs and /background missions must not overlap. The active
@@ -124,16 +138,24 @@ def runtime_kind():
     return "hermes" if ok else "mock"
 
 
+def compose_prompt(message, system):
+    """The one turn of text JARVIS sends, identical on both runtimes."""
+    if not system:
+        return message
+    return (f"{system}\n\n## Current user request\n{message}\n\n"
+            "Answer the request now. Return only the words JARVIS should say aloud; "
+            "never include session IDs, runtime metadata, headings, or process narration.")
+
+
 def build_command(message, session_id=None, system=None):
     # Hermes chat has no separate --system flag. Put the voice persona and the
     # current request into one explicit turn so the model answers as JARVIS
     # instead of narrating its CLI/runtime. Quiet mode removes the Hermes banner.
-    prompt = message
-    if system:
-        prompt = (f"{system}\n\n## Current user request\n{message}\n\n"
-                  "Answer the request now. Return only the words JARVIS should say aloud; "
-                  "never include session IDs, runtime metadata, headings, or process narration.")
-    cmd = _hermes_base() + ["chat", "-Q", "-q", prompt, "--source", SOURCE]
+    prompt = compose_prompt(message, system)
+    cmd = _hermes_base() + ["chat"]
+    if not STREAM_CLI:
+        cmd.append("-Q")
+    cmd += ["-q", prompt, "--source", SOURCE]
     if valid_session(session_id):
         cmd += ["--resume", str(session_id)]
     if PROFILE and PROFILE != "default":
@@ -142,6 +164,8 @@ def build_command(message, session_id=None, system=None):
         cmd += ["--model", MODEL]
     if TOOLSETS:
         cmd += ["--toolsets", TOOLSETS]
+    if REASONING:
+        cmd += ["--reasoning", REASONING]
     # Hermes one-shot output is currently plain text; slash commands that need a
     # live TUI are handled in commands.py before we get here. Prompts go to the
     # real agent with normal tool access.
@@ -333,10 +357,62 @@ def run_mock(message, session_id=None, system=None):
                                   f"Diagnostic: {detail[:240]}"))
 
 
+def _acp_agent():
+    import acp_client
+    return acp_client.get_agent(_hermes_base(), WORKDIR)
+
+
+def warm():
+    """Boot the resident agent ahead of the first question. Best effort."""
+    if not (ACP_ENABLED and runtime_kind() == "hermes"):
+        return False
+    try:
+        return _acp_agent().start()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def run_acp(message, session_id=None, system=None):
+    """Stream one turn through the resident process.
+
+    The handshake happens BEFORE anything is yielded, so a failure here can
+    still fall back to spawning the CLI with the caller none the wiser. Once
+    the first event is out we are committed -- a mid-stream failure surfaces
+    as an error, exactly as a crashed subprocess would.
+    """
+    agent = _acp_agent()
+    if not agent.start():                     # raises or returns False; no events yet
+        raise RuntimeError("ACP session unavailable")
+    # The HUD clears SESSION["id"] for /new. With a resident process that has to
+    # mean "open a fresh session", or the conversation grows all day and /new
+    # quietly does nothing.
+    if agent.session_id and not session_id:
+        agent.new_session()
+    yield dict(t="status", model=MODEL or "Hermes default", tools=0, mcp=[],
+               permission=PERMISSION, profile=PROFILE, runtime="hermes-acp",
+               session_id=agent.session_id)
+    yield from agent.prompt(compose_prompt(message, system))
+
+
 def run(message, session_id=None, system=None):
     if runtime_kind() != "hermes":
         yield from run_mock(message, session_id, system)
         return
+    if ACP_ENABLED:
+        emitted = False
+        try:
+            for ev in run_acp(message, session_id, system):
+                emitted = True
+                yield ev
+            return
+        except Exception as e:  # noqa: BLE001
+            if emitted:
+                # Already streamed part of an answer -- and on voice, already
+                # SPOKE part of it. Re-running through the subprocess would say
+                # the whole thing a second time. Fail this turn instead.
+                yield dict(t="error", message=f"resident agent dropped mid-answer: {e}")
+                return
+            yield dict(t="note", message=f"resident agent unavailable ({e}); using subprocess")
     try:
         yield from run_hermes(message, session_id, system)
     except Exception as e:  # noqa: BLE001

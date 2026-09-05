@@ -60,6 +60,47 @@ function usageBlock(u){
 let running = false, answer = '', firstDelta = false, speakThisRun = true;
 let speakDone = Promise.resolve(), activeController = null;
 
+// ── streaming speech ────────────────────────────────────────────────────
+// Waiting for the whole answer before speaking cost ~5s of dead air on every
+// question: generate fully → synthesize fully → play. Instead we hand each
+// finished sentence to TTS as it streams in, so JARVIS starts talking while the
+// rest of the answer is still being written and the tail is never heard as a gap.
+// Chunks are played through one promise chain so they can never overlap.
+const SPEECH_MIN_CHUNK = 60;    // don't fire a request for a three-word fragment
+const SPEECH_BUDGET    = 700;   // same ceiling the old single-shot speak() used
+let spokenUpTo = 0, spokenChars = 0, speakPrev = '', speakChain = Promise.resolve();
+
+function resetSpeechStream(){
+  spokenUpTo = 0; spokenChars = 0; speakPrev = '';
+  speakChain = Promise.resolve(); speakDone = speakChain;
+}
+
+// Complete sentences waiting at the tail of `answer`, or '' if none yet.
+// `final` takes whatever is left regardless of punctuation.
+function takeSpeakable(final){
+  const tail = answer.slice(spokenUpTo);
+  if (!tail.trim()) return '';
+  if (final){ spokenUpTo = answer.length; return tail; }
+  const m = /^[\s\S]*[.!?…](?=[\s"')\]]|$)/.exec(tail);
+  if (!m) return '';
+  const chunk = m[0];
+  if (chunk.trim().length < SPEECH_MIN_CHUNK) return '';   // let it grow
+  spokenUpTo += chunk.length;
+  return chunk;
+}
+
+function enqueueSpeech(final){
+  if (!speakThisRun || muted) return;
+  if (spokenChars >= SPEECH_BUDGET) return;               // long answer: read it on screen
+  const chunk = takeSpeakable(final);
+  if (!chunk.trim()) return;
+  spokenChars += chunk.length;
+  const prev = speakPrev;
+  speakPrev = chunk;
+  speakChain = speakChain.then(() => speak(chunk, prev)).catch(() => {});
+  speakDone = speakChain;
+}
+
 async function transmit(message, options = {}){
   if (!message.trim()) return;
   if (running){
@@ -68,6 +109,7 @@ async function transmit(message, options = {}){
     return;
   }
   running = true; answer = ''; firstDelta = false; speakThisRun = options.speak !== false;
+  resetSpeechStream();
 
   const fresh = /^\/new\b/.test(message.trim());
   const id = rid();
@@ -145,6 +187,7 @@ function handle(ev){
         firstDelta = true;
         log('reason', 'REASONING', answer.slice(0, 220));
       }
+      enqueueSpeech(false);
       break;
     case 'usage':
       log('status', 'COMPLETE', 'run completed', usageBlock(ev));
@@ -154,7 +197,7 @@ function handle(ev){
       setTag('done', 'COMPLETE');
       log('complete', 'COMPLETE', ev.ms!=null?`run completed in ${ev.ms}ms`:'run completed');
       renderAnswer(true);
-      speakDone = speakThisRun ? speak(answer) : Promise.resolve();
+      enqueueSpeech(true);            // speak whatever is left; earlier sentences are already out
       break;
     case 'error':
       setState('error', 'FAULT', ev.message?.slice(0,40) || 'error');
@@ -198,6 +241,12 @@ function cleanForSpeech(text){
    The mic is deliberately DEAF while Jarvis is thinking or speaking (`suppress`)
    — otherwise it transcribes his own voice through the speakers and talks to
    itself forever. That's why re-arming happens only after he finishes. */
+// Spoken commands that end the conversation immediately. Matched on the
+// transcript BEFORE the agent ever sees it, so sleeping never waits on Hermes
+// and never depends on the model choosing to cooperate. The follow-up window
+// stays 8s for natural pauses -- this is the deliberate way out of it.
+const SLEEP_RE = /^\s*(?:ok(?:ay)?[,\s]+)?(?:hey\s+)?(?:jarvis[,\s]*)?(?:please\s+)?(?:go\s+to\s+sleep|goto\s+sleep|go\s+back\s+to\s+sleep|goodnight|good\s*night|stand\s+down|stop\s+listening|that(?:'|\u2019)?s\s+all|that\s+is\s+all|never\s*mind|dismissed|we(?:'|\u2019)?re\s+done|nothing\s+else)\s*[.!,]?\s*$/i;
+
 let convo = false, suppress = false;
 // Wake word. The detector lives in the Python server (browsers suspend audio in
 // background tabs), so the browser's only jobs are: poll for a trigger, and mute
@@ -213,11 +262,13 @@ function setWakeMute(on){
 
 // A short two-tone chirp, generated locally. A wake word you cannot hear
 // respond is indistinguishable from one that did not fire.
-function chirp(){
+// chirp() rises (awake); chirp(true) falls (going to sleep) so the two are
+// tellable apart without looking at the screen.
+function chirp(down){
   try {
     const ctx = new (window.AudioContext||window.webkitAudioContext)();
     const now = ctx.currentTime;
-    [[880, 0], [1320, .09]].forEach(([hz, at]) => {
+    (down ? [[1320, 0], [880, .09]] : [[880, 0], [1320, .09]]).forEach(([hz, at]) => {
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.type = 'sine'; o.frequency.value = hz;
       g.gain.setValueAtTime(0.0001, now+at);
@@ -247,7 +298,7 @@ let noSpeechWindow = NO_SPEECH_MS;
 
 // ── voice out ──
 let muted = false, player = null;
-function speak(text){
+function speak(text, previous){
   return new Promise(resolve => {
     text = cleanForSpeech(text);
     if (muted || !text) return resolve();
@@ -266,7 +317,7 @@ function speak(text){
     }
     if (!RT.tts) return resolve();
     fetch('/api/speak', {method:'POST', headers:apiHeaders({'content-type':'application/json'}),
-                         body: JSON.stringify({text:spoken})})
+                         body: JSON.stringify({text:spoken, previous:previous||''})})
       .then(r => r.ok ? r.blob() : Promise.reject())
       .then(blob => {
         const url = URL.createObjectURL(blob);
@@ -459,15 +510,25 @@ async function ship(){
       headers:apiHeaders({'content-type':blob.type||'audio/webm'}), body:blob}).then(r=>r.json());
     const text = (r.text||'').trim();
     const ms = Math.round(performance.now() - t0);
-    if (!text){
-      log('voice','VOICE','nothing transcribed');
+    // Scribe labels non-speech as audio events -- "(silence)", "(laughter)",
+    // "[BLANK_AUDIO]". Those are not things you said and must never become a
+    // prompt; sending one is how JARVIS ends up answering the empty room.
+    const speech = text.replace(/[([][^)\]]{0,40}[)\]]/g, ' ').replace(/\s{2,}/g,' ').trim();
+    if (!speech || !/[a-z0-9]/i.test(speech)){
+      log('voice','VOICE', text ? `ignored non-speech: "${text}"` : 'nothing transcribed');
       if (convo) beginTurn(); else setState('','STANDBY','nothing heard');
       return;
     }
+    if (SLEEP_RE.test(speech)){
+      log('voice','VOICE',`sleep command: "${speech}"`);
+      chirp(true);
+      stopConvo();
+      return;
+    }
     idleTurns = 0;
-    log('voice','VOICE',`transcribed by ElevenLabs in ${ms}ms: "${text}"`);
+    log('voice','VOICE',`transcribed by ElevenLabs in ${ms}ms: "${speech}"`);
     const armed = $('#input').dataset.cmd || '';
-    const full = (armed ? armed + ' ' : '') + text;
+    const full = (armed ? armed + ' ' : '') + speech;
     $('#input').value = ''; disarm();
     log('send','SEND',`auto-sent voice: ${full}`);
     await transmit(full);                       // runs, then speaks; both with mic deaf
