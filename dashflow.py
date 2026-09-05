@@ -303,11 +303,22 @@ def board(list_ids=None):
                   if (l.get("title") or "").strip() == HIDDEN_LIST_TITLE}
     shown = _visible_lists(all_lists)
 
-    tasks, err = call_tool("list_tasks", {"limit": 500})
-    if err:
-        return dict(ok=False, error=err, lists=shown, tasks=[])
+    # One call per column, not one call for everything.
+    #
+    # list_tasks orders by status and then applies the limit. Status sorts
+    # alphabetically -- backlog, done, this_week, today -- so "today" is LAST,
+    # and a busy account (hundreds of imported calendar rows land in `done` and
+    # `backlog`) fills the cap before reaching it. The board then showed Today
+    # as empty while the app showed eight, which is the worst kind of wrong:
+    # it looks like an answer.
+    rows = []
+    for status in ("backlog", "this_week", "today", "done"):
+        got, err = call_tool("list_tasks", {"status": status, "limit": 300})
+        if err:
+            return dict(ok=False, error=err, lists=shown, tasks=[])
+        rows.extend(_as_list(got, "tasks", "data", "items"))
 
-    rows = _visible_tasks(_as_list(tasks, "tasks", "data", "items"), hidden_ids)
+    rows = _visible_tasks(rows, hidden_ids)
     if list_ids:
         keep = set(list_ids)
         rows = [t for t in rows if t.get("list_id") in keep]

@@ -1088,7 +1088,9 @@ setInterval(async () => {
   const TODAY_COL = COLS.findIndex(c => c.key === 'today');
   let view = 'board', col = TODAY_COL, lists = [], picked = [], tasks = [];
   let openSubs = {};                        // task id -> subtask rows
-  let calCursor = new Date(); calCursor.setDate(1);
+  // Week by default: a month grid is six rows tall and this column is not.
+  let calMode = 'week';
+  let calCursor = new Date();
   let calSel = iso(new Date()), calTasks = [];
 
   // Multi-select survives a reload, the way the app's localStorage does.
@@ -1256,36 +1258,60 @@ setInterval(async () => {
   }
 
   // ── calendar, from calendar.tsx ─────────────────────────────────────────
-  async function loadCal(){
+  /** The days on screen, and therefore the range to fetch. */
+  function calRange(){
+    if (calMode === 'week'){
+      const start = new Date(calCursor);
+      start.setDate(start.getDate() - start.getDay());
+      return {start, days: 7};
+    }
     const first = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
-    const start = new Date(first); start.setDate(first.getDate() - first.getDay());
-    const end = new Date(start); end.setDate(start.getDate() + 41);
+    const start = new Date(first);
+    start.setDate(first.getDate() - first.getDay());
+    return {start, days: 42};
+  }
+
+  async function loadCal(){
+    $$('calCards').innerHTML = '<div class="df-empty">loading…</div>';
+    const {start, days} = calRange();
+    const end = new Date(start); end.setDate(start.getDate() + days - 1);
     const b = await api(`/scheduled?start=${iso(start)}&end=${iso(end)}`);
     calTasks = b.ok ? (b.tasks || []) : [];
+    if (!b.ok) $$('calCards').innerHTML = `<div class="df-problem">${esc(b.error||'calendar unavailable')}</div>`;
     renderCal();
   }
 
   function renderCal(){
+    if (view !== 'calendar') return;
     $$('dfViewName').textContent = 'Calendar';
     $$('dfSub').textContent = '';
     $$('dfProgress').hidden = true;
     $$('dfDashAllLabel').textContent = 'Dash all';
-    $$('calMonth').textContent = calCursor.toLocaleDateString(undefined,{month:'long',year:'numeric'});
+    const {start: gridStart, days: gridDays} = calRange();
+    $$('calMode').textContent = calMode === 'week' ? 'Month' : 'Week';
+    if (calMode === 'week'){
+      const last = new Date(gridStart); last.setDate(gridStart.getDate() + 6);
+      const sameMonth = gridStart.getMonth() === last.getMonth();
+      $$('calMonth').textContent = sameMonth
+        ? `${gridStart.toLocaleDateString(undefined,{month:'short'})} ${gridStart.getDate()}–${last.getDate()}`
+        : `${gridStart.toLocaleDateString(undefined,{month:'short',day:'numeric'})} – ${last.toLocaleDateString(undefined,{month:'short',day:'numeric'})}`;
+    } else {
+      $$('calMonth').textContent = calCursor.toLocaleDateString(undefined,{month:'long',year:'numeric'});
+    }
 
     const byDate = {};
     for (const t of calTasks){
       if (!t.due_date) continue;
       (byDate[t.due_date.slice(0,10)] ||= []).push(t);
     }
-    const first = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
-    const start = new Date(first); start.setDate(first.getDate() - first.getDay());
     const todayIso = iso(new Date());
     let html = '';
-    for (let i = 0; i < 42; i++){
-      const d = new Date(start); d.setDate(start.getDate() + i);
+    for (let i = 0; i < gridDays; i++){
+      const d = new Date(gridStart); d.setDate(gridStart.getDate() + i);
       const k = iso(d);
       const n = (byDate[k] || []).filter(t => !isDone(t)).length;
-      html += `<button class="calday-btn ${d.getMonth()!==calCursor.getMonth()?'out':''} ${k===todayIso?'today':''} ${k===calSel?'on':''}" data-day="${k}">`
+      const out = calMode === 'month' && d.getMonth() !== calCursor.getMonth();
+      html += `<button class="calday-btn ${out?'out':''} ${k===todayIso?'today':''} ${k===calSel?'on':''}" data-day="${k}">`
             + `${d.getDate()}${n?`<b>${n}</b>`:''}</button>`;
     }
     $$('calGrid').innerHTML = html;
@@ -1405,12 +1431,28 @@ setInterval(async () => {
   // ── chrome ──────────────────────────────────────────────────────────────
   document.querySelectorAll('.dfnav').forEach(b => b.onclick = () => {
     view = b.dataset.view;
-    if (view === 'calendar') loadCal(); else render();
+    // render() owns which view is visible, so it has to run on every switch.
+    // Calling loadCal() alone fetched the month and showed nobody anything.
+    render();
+    if (view === 'calendar') loadCal();
   });
   $$('colPrev').onclick = () => { col = (col+3)%4; render(); };
   $$('colNext').onclick = () => { col = (col+1)%4; render(); };
-  $$('calPrev').onclick = () => { calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth()-1, 1); loadCal(); };
-  $$('calNext').onclick = () => { calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth()+1, 1); loadCal(); };
+  function calStep(dir){
+    const d = new Date(calCursor);
+    if (calMode === 'week') d.setDate(d.getDate() + 7*dir);
+    else { d.setMonth(d.getMonth() + dir); d.setDate(1); }
+    calCursor = d;
+    loadCal();
+  }
+  $$('calPrev').onclick = () => calStep(-1);
+  $$('calNext').onclick = () => calStep(1);
+  $$('calMode').onclick = () => {
+    calMode = calMode === 'week' ? 'month' : 'week';
+    // Stay on the day being looked at rather than jumping to the 1st.
+    calCursor = new Date(calSel + 'T00:00:00');
+    loadCal();
+  };
 
   $$('dfDashAll').onclick = () => {
     const pool = (view === 'board' ? tasks.filter(t => t.status === COLS[col].key)

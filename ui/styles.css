@@ -264,3 +264,21 @@ body.drawer-open .drawer-scrim{opacity:1;pointer-events:auto}
 .dfnav.on{color:var(--cyan)}
 .df-problem{font-family:var(--mono);font-size:10.5px;line-height:1.65;color:var(--amber);padding:16px 2px}
 .df-empty{font-family:var(--mono);font-size:11px;color:var(--dim);text-align:center;padding:26px 10px}
+
+/* A month grid is six rows tall and this panel is not. Week is the default;
+   month is one click away for when the question is "when", not "today". */
+.calmode{cursor:pointer;border:1px solid var(--edge);border-radius:999px;background:rgba(5,18,28,.7);color:var(--mut);font-family:var(--mono);font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;padding:4px 9px;transition:.16s}
+.calmode:hover{color:var(--cyan);border-color:var(--edge-2)}
+.calhead{gap:8px}
+.calmonth{flex:1;text-align:center}
+
+/* Nothing in this panel may grow past the bottom nav. The month grid is 42
+   aspect-ratio cells and will happily push the whole view off-screen, so the
+   grid is allowed to shrink and the card list is the only thing that scrolls. */
+.dashflow{overflow:hidden}
+.df-view{overflow:hidden}
+.calcard{flex:0 1 auto;min-height:0;overflow:hidden}
+.calday-btn{max-height:44px}
+.calgrid{min-height:0}
+.calday{padding:2px 0}
+.cardlist{overscroll-behavior:contain}
