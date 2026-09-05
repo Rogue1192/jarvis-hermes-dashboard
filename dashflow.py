@@ -287,8 +287,13 @@ def _as_list(payload, *keys):
     return []
 
 
-def snapshot(list_id=None, status="today"):
-    """What the Today panel renders: the lists to filter by, and the tasks."""
+def board(list_ids=None):
+    """Every column at once, which is what a board is.
+
+    DashFlow's own board fetches all tasks and buckets them client-side, so
+    this does the same rather than four round trips. Filtering by list is done
+    here too: list_tasks takes a single list_id, and Casey selects several.
+    """
     lists, err = call_tool("list_lists")
     if err:
         return dict(ok=False, error=err, lists=[], tasks=[])
@@ -296,22 +301,38 @@ def snapshot(list_id=None, status="today"):
     all_lists = _as_list(lists, "lists", "data", "items")
     hidden_ids = {l.get("id") for l in all_lists
                   if (l.get("title") or "").strip() == HIDDEN_LIST_TITLE}
-    shown_lists = _visible_lists(all_lists)
+    shown = _visible_lists(all_lists)
 
-    # Ask for more than we will show, since the hidden ones come out of the
-    # same allowance.
-    args = {"status": status, "limit": 300}
-    if list_id:
-        args["list_id"] = list_id
-    tasks, err = call_tool("list_tasks", args)
+    tasks, err = call_tool("list_tasks", {"limit": 500})
     if err:
-        return dict(ok=False, error=err, lists=shown_lists, tasks=[])
+        return dict(ok=False, error=err, lists=shown, tasks=[])
 
-    return dict(ok=True,
-                lists=shown_lists,
-                tasks=_visible_tasks(_as_list(tasks, "tasks", "data", "items"), hidden_ids),
-                status=status,
-                list_id=list_id)
+    rows = _visible_tasks(_as_list(tasks, "tasks", "data", "items"), hidden_ids)
+    if list_ids:
+        keep = set(list_ids)
+        rows = [t for t in rows if t.get("list_id") in keep]
+    return dict(ok=True, lists=shown, tasks=rows)
+
+
+def scheduled(start, end):
+    """Tasks with a due date in a range — the calendar's month grid.
+
+    Includes the hidden Google Calendar list ON PURPOSE: those imported
+    appointments are exactly what a calendar is for. They are hidden from the
+    board, not from the calendar.
+    """
+    tasks, err = call_tool("list_tasks",
+                           {"due_from": start, "due_to": end, "limit": 500})
+    if err:
+        return dict(ok=False, error=err, tasks=[])
+    return dict(ok=True, tasks=_as_list(tasks, "tasks", "data", "items"))
+
+
+def subtasks(task_id):
+    out, err = call_tool("list_subtasks", {"task_id": task_id})
+    if err:
+        return dict(ok=False, error=err, subtasks=[])
+    return dict(ok=True, subtasks=_as_list(out, "subtasks", "data", "items"))
 
 
 def complete(task_id):
@@ -319,11 +340,99 @@ def complete(task_id):
     return dict(ok=not err, error=err)
 
 
-def add(title, list_id=None, status="today", estimate_minutes=None):
+def add(title, list_id=None, status="backlog", estimate_minutes=None, due_date=None):
     args = {"title": title, "status": status}
     if list_id:
         args["list_id"] = list_id
     if estimate_minutes:
         args["estimate_minutes"] = int(estimate_minutes)
+    if due_date:
+        args["due_date"] = due_date
     out, err = call_tool("create_task", args)
     return dict(ok=not err, error=err, task=out)
+
+
+def update(task_id, **fields):
+    """Anything editable on a task: title, column, estimate, due date, list."""
+    args = {"task_id": task_id}
+    for k in ("title", "status", "estimate_minutes", "due_date", "list_id",
+              "description", "pin_position"):
+        if k in fields and fields[k] is not None:
+            args[k] = fields[k]
+    if len(args) == 1:
+        return dict(ok=False, error="nothing to change")
+    _, err = call_tool("update_task", args)
+    return dict(ok=not err, error=err)
+
+
+def add_subtask(task_id, title, estimate_minutes=None):
+    args = {"task_id": task_id, "title": title}
+    if estimate_minutes is not None:
+        args["estimate_minutes"] = int(estimate_minutes)
+    _, err = call_tool("add_subtask", args)
+    return dict(ok=not err, error=err)
+
+
+def update_subtask(subtask_id, **fields):
+    args = {"subtask_id": subtask_id}
+    for k in ("title", "is_done", "estimate_minutes", "delete"):
+        if k in fields and fields[k] is not None:
+            args[k] = fields[k]
+    _, err = call_tool("update_subtask", args)
+    return dict(ok=not err, error=err)
+
+
+def delete_task(task_id):
+    _, err = call_tool("delete_task", {"task_id": task_id})
+    return dict(ok=not err, error=err)
+
+
+# ── Dash: the focus session ────────────────────────────────────────────────
+# DashFlow runs a queue client-side and starts a session per task. The HUD
+# keeps the queue and drives start_focus/stop_focus the same way, so a Dash
+# started here is the same session the phone sees.
+_DASH = {"queue": [], "label": "", "index": 0}
+
+
+def dash_start(task_ids, label=""):
+    ids = [t for t in (task_ids or []) if t]
+    if not ids:
+        return dict(ok=False, error="nothing to dash")
+    _DASH.update(queue=ids, label=label, index=0)
+    _, err = call_tool("start_focus", {"task_id": ids[0]})
+    if err:
+        return dict(ok=False, error=err)
+    return dict(ok=True, **dash_status())
+
+
+def dash_next(complete_current=True):
+    """Finish the current task and roll straight into the next one."""
+    _, err = call_tool("stop_focus", {"complete_task": bool(complete_current)})
+    if err:
+        return dict(ok=False, error=err)
+    _DASH["index"] += 1
+    if _DASH["index"] >= len(_DASH["queue"]):
+        _DASH.update(queue=[], index=0, label="")
+        return dict(ok=True, running=False, finished=True)
+    _, err = call_tool("start_focus", {"task_id": _DASH["queue"][_DASH["index"]]})
+    if err:
+        return dict(ok=False, error=err)
+    return dict(ok=True, **dash_status())
+
+
+def dash_stop():
+    _, err = call_tool("stop_focus", {"complete_task": False})
+    _DASH.update(queue=[], index=0, label="")
+    return dict(ok=not err, error=err, running=False)
+
+
+def dash_status():
+    out, err = call_tool("focus_status")
+    if err:
+        return dict(running=False, error=err)
+    live = out if isinstance(out, dict) else {}
+    return dict(running=bool(live.get("running") or live.get("session") or live.get("task_id")),
+                session=live,
+                queue_length=len(_DASH["queue"]),
+                queue_index=_DASH["index"],
+                label=_DASH["label"])

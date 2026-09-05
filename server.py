@@ -174,9 +174,23 @@ class Handler(BaseHTTPRequestHandler):
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
             q = parse_qs(urlparse(self.path).query)
-            return self._json(dashflow.snapshot(
-                list_id=(q.get("list_id") or [None])[0],
-                status=(q.get("status") or ["today"])[0]))
+            ids = [x for x in (q.get("lists") or [""])[0].split(",") if x]
+            return self._json(dashflow.board(list_ids=ids or None))
+        if p == "/api/dashflow/scheduled":
+            if not self._token_ok():
+                return self._json({"error": "unauthorized"}, 401)
+            q = parse_qs(urlparse(self.path).query)
+            return self._json(dashflow.scheduled(
+                (q.get("start") or [""])[0], (q.get("end") or [""])[0]))
+        if p == "/api/dashflow/subtasks":
+            if not self._token_ok():
+                return self._json({"error": "unauthorized"}, 401)
+            q = parse_qs(urlparse(self.path).query)
+            return self._json(dashflow.subtasks((q.get("task_id") or [""])[0]))
+        if p == "/api/dashflow/dash":
+            if not self._token_ok():
+                return self._json({"error": "unauthorized"}, 401)
+            return self._json(dashflow.dash_status())
         if p == "/api/board/archive":
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
@@ -217,9 +231,7 @@ class Handler(BaseHTTPRequestHandler):
         ctype = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
         if p in {"/api/run", "/api/speak", "/api/new", "/api/cancel", "/api/wake"} and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
-        if p in {"/api/board/decide", "/api/board/archive", "/api/board/unarchive",
-                 "/api/dashflow/complete", "/api/dashflow/add"} \
-                and ctype != "application/json":
+        if p.startswith(("/api/board/", "/api/dashflow/")) and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
         if p == "/api/listen" and not ctype.startswith("audio/"):
             return self._json({"error": "audio content type required"}, 415)
@@ -261,19 +273,43 @@ class Handler(BaseHTTPRequestHandler):
                                note=body.get("note"))
             return self._json(res, 200 if res.get("ok") else 400)
 
-        if p in {"/api/dashflow/complete", "/api/dashflow/add"}:
+        if p.startswith("/api/dashflow/"):
             try:
                 body = json.loads(raw or b"{}")
             except json.JSONDecodeError:
                 return self._json({"error": "bad json"}, 400)
-            if p.endswith("/complete"):
-                res = dashflow.complete(str(body.get("task_id") or ""))
-            else:
+            act = p.rsplit("/", 1)[-1]
+            tid = str(body.get("task_id") or "")
+            if act == "complete":
+                res = dashflow.complete(tid)
+            elif act == "add":
                 res = dashflow.add(
                     title=str(body.get("title") or "").strip(),
                     list_id=body.get("list_id"),
-                    status=body.get("status") or "today",
-                    estimate_minutes=body.get("estimate_minutes"))
+                    status=body.get("status") or "backlog",
+                    estimate_minutes=body.get("estimate_minutes"),
+                    due_date=body.get("due_date"))
+            elif act == "update":
+                res = dashflow.update(tid, **{k: v for k, v in body.items()
+                                              if k != "task_id"})
+            elif act == "delete":
+                res = dashflow.delete_task(tid)
+            elif act == "subtask-add":
+                res = dashflow.add_subtask(tid, str(body.get("title") or "").strip(),
+                                           body.get("estimate_minutes"))
+            elif act == "subtask-update":
+                res = dashflow.update_subtask(
+                    str(body.get("subtask_id") or ""),
+                    **{k: v for k, v in body.items() if k != "subtask_id"})
+            elif act == "dash-start":
+                res = dashflow.dash_start(body.get("task_ids") or [],
+                                          str(body.get("label") or ""))
+            elif act == "dash-next":
+                res = dashflow.dash_next(bool(body.get("complete", True)))
+            elif act == "dash-stop":
+                res = dashflow.dash_stop()
+            else:
+                return self._json({"error": "unknown dashflow action"}, 404)
             return self._json(res, 200 if res.get("ok") else 400)
 
         if p in {"/api/board/archive", "/api/board/unarchive"}:

@@ -1062,141 +1062,374 @@ setInterval(async () => {
   window.jarvisBoard = { reload: load };
 })();
 
-/* ── Today, from DashFlow ──────────────────────────────────────────────────
-   Reads through the same MCP tools JARVIS has, so what is on screen and what
-   he can act on are the same thing by construction.
 
-   Defaults to the Today column because that is what the app itself does; the
-   arrows walk the other three, and the pills filter by list. */
-(function today(){
+/* ── DashFlow ──────────────────────────────────────────────────────────────
+   Board / Today / Calendar, ported from Casey's own components rather than
+   guessed at from a screenshot: task-card.tsx for the card, estimates.ts for
+   the time maths, board.tsx for the column strip, calendar.tsx for the month
+   grid, mobile-nav.tsx for the three tabs.
+
+   Everything goes through the MCP tools JARVIS holds, so a change made here
+   and a change he makes by voice are the same change. */
+(function dashflow(){
   const COLS = [
-    {key:'backlog',    label:'Backlog'},
-    {key:'this_week',  label:'This Week'},
-    {key:'today',      label:'Today'},
-    {key:'done',       label:'Done'},
+    {key:'backlog',   label:'Backlog'},
+    {key:'this_week', label:'This Week'},
+    {key:'today',     label:'Today'},
+    {key:'done',      label:'Done'},
   ];
-  const listEl  = document.getElementById('todayList');
-  const pillsEl = document.getElementById('listPills');
-  const nameEl  = document.getElementById('colName');
-  const srcEl   = document.getElementById('todaySource');
-  const countEl = document.getElementById('todayCount');
-  const addEl   = document.getElementById('todayAdd');
-  if (!listEl) return;
+  const $$ = id => document.getElementById(id);
+  const panel = $$('todayPanel');
+  if (!panel) return;
 
-  let col = 2;              // Today
-  let listId = null;        // null = all lists
-  let lists = [];
+  let view = 'board', col = 0, lists = [], picked = [], tasks = [];
+  let openSubs = {};                        // task id -> subtask rows
+  let calCursor = new Date(); calCursor.setDate(1);
+  let calSel = iso(new Date()), calTasks = [];
 
-  const mins = n => {
-    if (!n) return '';
-    const h = Math.floor(n / 60), m = n % 60;
-    return h ? (m ? `${h}hr ${m}min` : `${h}hr`) : `${m}min`;
-  };
+  // Multi-select survives a reload, the way the app's localStorage does.
+  try { picked = JSON.parse(localStorage.getItem('jarvis:df-lists') || '[]'); } catch(e){ picked = []; }
+  const savePicked = () => { try { localStorage.setItem('jarvis:df-lists', JSON.stringify(picked)); } catch(e){} };
+
+  function iso(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+  function fmtMin(n){                        // estimates.ts formatMinutes
+    if (!n) return '0min';
+    const h = Math.floor(n/60), m = n%60;
+    if (h && m) return `${h}hr ${m}min`;
+    return h ? `${h}hr` : `${m}min`;
+  }
+  const fmtEst = (n, lower) => `${lower ? '≥ ' : ''}${fmtMin(n)}`;
+  const isDone = t => t.status === 'done' || !!t.completed_at;
+  const rem = t => t.remaining_minutes ?? t.total_minutes ?? t.estimate_minutes ?? 0;
+
+  async function api(path, body){
+    const r = await fetch('/api/dashflow' + path, body ? {
+      method:'POST', headers: apiHeaders({'content-type':'application/json'}),
+      body: JSON.stringify(body)
+    } : {headers: apiHeaders()});
+    return r.json().catch(()=>({ok:false,error:'bad response'}));
+  }
+
+  // ── data ────────────────────────────────────────────────────────────────
+  async function load(){
+    const qs = picked.length ? '?lists=' + picked.join(',') : '';
+    const b = await api(qs);
+    if (!b.ok){ fail(b.error); return; }
+    lists = b.lists || [];
+    tasks = b.tasks || [];
+    drawPills();
+    render();
+  }
+
+  function fail(msg){
+    for (const id of ['boardCards','todayCards','calCards'])
+      $$(id).innerHTML = `<div class="df-problem">${esc(msg || 'DashFlow unavailable')}</div>`;
+  }
 
   function drawPills(){
-    pillsEl.innerHTML =
-      `<button class="lpill ${listId===null?'on':''}" data-list="">All lists</button>`
-      + lists.map(l => `<button class="lpill ${listId===l.id?'on':''}" data-list="${esc(l.id)}">${esc(l.title || l.name || 'Untitled')}</button>`).join('');
-    pillsEl.querySelectorAll('.lpill').forEach(b => b.onclick = () => {
-      listId = b.dataset.list || null;
-      load();
+    const el = $$('listPills');
+    el.innerHTML = `<button class="lpill ${picked.length?'':'on'}" data-id="">All Lists</button>`
+      + lists.map(l => `<button class="lpill ${picked.includes(l.id)?'on':''}" data-id="${esc(l.id)}">${esc(l.title)}</button>`).join('');
+    el.querySelectorAll('.lpill').forEach(b => b.onclick = () => {
+      const id = b.dataset.id;
+      if (!id) picked = [];
+      else picked = picked.includes(id) ? picked.filter(x=>x!==id) : [...picked, id];
+      savePicked(); load();
     });
   }
 
-  async function load(){
-    nameEl.textContent = COLS[col].label;
-    const qs = new URLSearchParams({status: COLS[col].key});
-    if (listId) qs.set('list_id', listId);
-    try {
-      const r = await fetch('/api/dashflow?' + qs, {headers: apiHeaders()});
-      const b = await r.json();
-
-      if (Array.isArray(b.lists) && b.lists.length){ lists = b.lists; drawPills(); }
-
-      if (!b.ok){
-        // Say what is wrong and what fixes it. "Not connected" with no next
-        // step is the same as saying nothing.
-        srcEl.textContent = '';
-        countEl.textContent = '';
-        listEl.innerHTML = `<div class="today-problem">${esc(b.error || 'DashFlow unavailable')}</div>`;
-        return;
-      }
-
-      const tasks = b.tasks || [];
-      // Done is status/completed_at -- there is no is_done on a task.
-      const isDone = t => t.status === 'done' || !!t.completed_at;
-      const open   = tasks.filter(t => !isDone(t));
-      // remaining_minutes, not estimate_minutes: it already nets off finished
-      // subtasks, which is what makes the app's "41hr 10min left" mean left.
-      const left = open.reduce((n,t) =>
-        n + (t.remaining_minutes ?? t.total_minutes ?? t.estimate_minutes ?? 0), 0);
-      const soft = open.some(t => t.minutes_are_lower_bound);
-
-      srcEl.textContent = '';
-      countEl.textContent = tasks.length
-        ? `${open.length} open${left ? ` · ${mins(left)}${soft ? '+' : ''} left` : ''}`
-        : '';
-
-      if (!tasks.length){
-        listEl.innerHTML = `<div class="today-problem" style="color:var(--dim)">Nothing in ${esc(COLS[col].label)}.</div>`;
-        return;
-      }
-
-      listEl.innerHTML = tasks.map(t => {
-        const done = isDone(t);
-        // The list title rides on the task itself, so it is right even for a
-        // list the pills do not know about -- Google Calendar sync, say.
-        const listName = t.lists && t.lists.title;
-        const sub = t.subtasks_total
-          ? `<span class="tag">${t.subtasks_done}/${t.subtasks_total}</span>` : '';
-        const m = t.remaining_minutes ?? t.total_minutes ?? t.estimate_minutes;
-        return `<button class="todo ${done?'done':''}" data-id="${esc(t.id)}">`
-             + `<span class="box"></span>`
-             + `<span class="txt">${esc(t.title || '(untitled)')}</span>`
-             + sub
-             + (listName ? `<span class="tag">${esc(listName)}</span>` : '')
-             + (m ? `<span class="est">${mins(m)}${t.minutes_are_lower_bound ? '+' : ''}</span>` : '')
-             + `</button>`;
-      }).join('');
-
-      listEl.querySelectorAll('.todo').forEach(el => {
-        el.onclick = async () => {
-          if (el.classList.contains('done')) return;
-          el.classList.add('done');                 // optimistic; load() corrects it
-          const r = await fetch('/api/dashflow/complete', {
-            method:'POST', headers: apiHeaders({'content-type':'application/json'}),
-            body: JSON.stringify({task_id: el.dataset.id})
-          });
-          const b = await r.json().catch(()=>({}));
-          if (!b.ok){ el.classList.remove('done'); alert(b.error || 'could not complete that'); }
-          else log('complete','DASHFLOW', `done — ${el.querySelector('.txt').textContent}`);
-          load();
-        };
-      });
-    } catch(e){
-      listEl.innerHTML = '<div class="today-problem">DashFlow panel unreachable.</div>';
+  // ── the card, from task-card.tsx ────────────────────────────────────────
+  function card(t, opts){
+    const done = isDone(t);
+    const chips = [];
+    chips.push(`<span class="tchip time ${t.minutes_are_lower_bound?'soft':''}" data-est="${esc(t.id)}" title="Click to change the estimate">${fmtEst(t.total_minutes ?? t.estimate_minutes ?? 0, t.minutes_are_lower_bound)}</span>`);
+    if (t.subtasks_total)
+      chips.push(`<span class="tchip">${t.subtasks_done} of ${t.subtasks_total} · ${fmtEst(rem(t), t.minutes_are_lower_bound)} left</span>`);
+    if (opts.showList && t.lists && t.lists.title)
+      chips.push(`<span class="tchip">${esc(t.lists.title)}</span>`);
+    if (t.due_date){
+      const cls = t.due_date < iso(new Date()) && !done ? 'over' : 'due';
+      chips.push(`<span class="tchip ${cls}">▤ ${esc(dueLabel(t.due_date))}</span>`);
     }
+
+    const idx = COLS.findIndex(c => c.key === t.status);
+    const arrows = opts.arrows ? `<div class="tc-arrows">
+        <button data-move="${esc(t.id)}" data-dir="-1" ${idx<=0?'disabled':''}>‹ ${idx>0?COLS[idx-1].label:'—'}</button>
+        <button data-move="${esc(t.id)}" data-dir="1" ${idx>=3?'disabled':''}>${idx<3?COLS[idx+1].label:'—'} ›</button>
+      </div>` : '';
+
+    const subs = openSubs[t.id] ? subsHtml(t) : '';
+    const dash = done ? '' : `<button class="tc-dash" data-dash="${esc(t.id)}">⚡ Dash</button>`;
+
+    return `<article class="tcard ${done?'done':''}" data-id="${esc(t.id)}">
+      <div class="tc-row">
+        <button class="tc-check" data-check="${esc(t.id)}">${done?'✓':''}</button>
+        <div class="tc-main">
+          <div class="tc-title" data-title="${esc(t.id)}">${esc(t.title)}</div>
+          <div class="tc-chips">${chips.join('')}</div>
+        </div>
+        <button class="tc-menu" data-menu="${esc(t.id)}">⋯</button>
+      </div>
+      ${subs}${arrows}${dash}
+    </article>`;
   }
 
-  document.getElementById('colPrev').onclick = () => { col = (col + COLS.length - 1) % COLS.length; load(); };
-  document.getElementById('colNext').onclick = () => { col = (col + 1) % COLS.length; load(); };
+  function subsHtml(t){
+    const rows = openSubs[t.id] || [];
+    const doneN = rows.filter(r => r.is_done).length;
+    const left = rows.filter(r => !r.is_done).reduce((n,r)=>n+(r.estimate_minutes||0),0);
+    return `<div class="subs">
+      <div class="subs-h">Subtasks ${doneN}/${rows.length}${left?` · ${fmtMin(left)} left`:''}</div>
+      ${rows.map(r => `<div class="sub ${r.is_done?'done':''}">
+        <button class="tc-check" data-sub="${esc(r.id)}" data-task="${esc(t.id)}">${r.is_done?'✓':''}</button>
+        <span class="sub-t">${esc(r.title || '')}</span>
+        <input class="sub-m" value="${r.estimate_minutes ?? ''}" data-submin="${esc(r.id)}" data-task="${esc(t.id)}" placeholder="min">
+        <button class="sub-x" data-subdel="${esc(r.id)}" data-task="${esc(t.id)}">✕</button>
+      </div>`).join('')}
+      <div class="sub-add">
+        <span class="plus">+</span>
+        <input class="t" placeholder="Add subtask" data-subadd="${esc(t.id)}">
+        <input class="sub-m" placeholder="min" data-subaddmin="${esc(t.id)}">
+      </div>
+    </div>`;
+  }
 
-  addEl.onkeydown = async e => {
-    if (e.key !== 'Enter') return;
-    const title = addEl.value.trim();
-    if (!title) return;
-    addEl.value = '';
-    const r = await fetch('/api/dashflow/add', {
-      method:'POST', headers: apiHeaders({'content-type':'application/json'}),
-      body: JSON.stringify({title, list_id: listId, status: COLS[col].key})
+  function dueLabel(d){
+    const today = iso(new Date());
+    if (d === today) return 'Today';
+    const tm = new Date(); tm.setDate(tm.getDate()+1);
+    if (d === iso(tm)) return 'Tomorrow';
+    const [y,m,dd] = d.split('-').map(Number);
+    return new Date(y,m-1,dd).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+  }
+
+  // ── render ──────────────────────────────────────────────────────────────
+  function render(){
+    ['board','today','calendar'].forEach(v => $$('view-'+v).hidden = (v !== view));
+    document.querySelectorAll('.dfnav').forEach(b => b.classList.toggle('on', b.dataset.view === view));
+    const open = tasks.filter(t => !isDone(t));
+    const soft = open.some(t => t.minutes_are_lower_bound);
+
+    if (view === 'board'){
+      $$('dfViewName').innerHTML = 'Dash<b>Flow</b>';
+      $$('dfSub').textContent = `${open.length} open · ${soft?'≥ ':''}${fmtMin(open.reduce((n,t)=>n+rem(t),0))} left`;
+      $$('dfDashAllLabel').textContent = picked.length ? `Dash ${picked.length} list${picked.length>1?'s':''}` : 'Dash all lists';
+      $$('dfProgress').hidden = true;
+      drawColPills();
+      const inCol = tasks.filter(t => t.status === COLS[col].key);
+      const colOpen = inCol.filter(t => !isDone(t));
+      $$('colName').textContent = COLS[col].label;
+      $$('colCount').textContent = inCol.length;
+      $$('colMins').textContent = colOpen.length ? `${fmtMin(colOpen.reduce((n,t)=>n+rem(t),0))} left` : '';
+      $$('colDash').disabled = colOpen.length === 0;
+      $$('boardCards').innerHTML = inCol.length
+        ? inCol.map(t => card(t, {arrows:true, showList:true})).join('')
+        : `<div class="df-empty">Nothing in ${esc(COLS[col].label)}.</div>`;
+    }
+
+    if (view === 'today'){
+      const day = tasks.filter(t => t.status === 'today');
+      const dayDone = day.filter(isDone).length;
+      $$('dfViewName').textContent = 'Today';
+      $$('dfSub').textContent = `${dayDone}/${day.length} done · ${soft?'≥ ':''}${fmtMin(day.filter(t=>!isDone(t)).reduce((n,t)=>n+rem(t),0))} left`;
+      $$('dfDashAllLabel').textContent = 'Dash all';
+      $$('dfProgress').hidden = false;
+      $$('dfProgressBar').style.width = day.length ? `${Math.round(dayDone/day.length*100)}%` : '0%';
+      $$('todayCards').innerHTML = day.length
+        ? day.map(t => card(t, {arrows:false, showList:true})).join('')
+        : '<div class="df-empty">Nothing in Today.</div>';
+    }
+
+    if (view === 'calendar') renderCal();
+    wire();
+  }
+
+  function drawColPills(){
+    $$('colPills').innerHTML = COLS.map((c,i) =>
+      `<button class="cpill ${i===col?'on':''}" data-col="${i}"><i></i>${c.label}</button>`).join('');
+    $$('colPills').querySelectorAll('.cpill').forEach(b =>
+      b.onclick = () => { col = +b.dataset.col; render(); });
+  }
+
+  // ── calendar, from calendar.tsx ─────────────────────────────────────────
+  async function loadCal(){
+    const first = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
+    const start = new Date(first); start.setDate(first.getDate() - first.getDay());
+    const end = new Date(start); end.setDate(start.getDate() + 41);
+    const b = await api(`/scheduled?start=${iso(start)}&end=${iso(end)}`);
+    calTasks = b.ok ? (b.tasks || []) : [];
+    renderCal();
+  }
+
+  function renderCal(){
+    $$('dfViewName').textContent = 'Calendar';
+    $$('dfSub').textContent = '';
+    $$('dfProgress').hidden = true;
+    $$('dfDashAllLabel').textContent = 'Dash all';
+    $$('calMonth').textContent = calCursor.toLocaleDateString(undefined,{month:'long',year:'numeric'});
+
+    const byDate = {};
+    for (const t of calTasks){
+      if (!t.due_date) continue;
+      (byDate[t.due_date.slice(0,10)] ||= []).push(t);
+    }
+    const first = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
+    const start = new Date(first); start.setDate(first.getDate() - first.getDay());
+    const todayIso = iso(new Date());
+    let html = '';
+    for (let i = 0; i < 42; i++){
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      const k = iso(d);
+      const n = (byDate[k] || []).filter(t => !isDone(t)).length;
+      html += `<button class="calday-btn ${d.getMonth()!==calCursor.getMonth()?'out':''} ${k===todayIso?'today':''} ${k===calSel?'on':''}" data-day="${k}">`
+            + `${d.getDate()}${n?`<b>${n}</b>`:''}</button>`;
+    }
+    $$('calGrid').innerHTML = html;
+    $$('calGrid').querySelectorAll('.calday-btn').forEach(b =>
+      b.onclick = () => { calSel = b.dataset.day; renderCal(); });
+
+    const [y,m,dd] = calSel.split('-').map(Number);
+    $$('calDayLabel').textContent = new Date(y,m-1,dd)
+      .toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'});
+    const day = byDate[calSel] || [];
+    $$('calCards').innerHTML = day.length
+      ? day.map(t => card(t, {arrows:false, showList:true})).join('')
+      : '<div class="df-empty">Nothing scheduled on this day.</div>';
+    wire();
+  }
+
+  // ── interactions ────────────────────────────────────────────────────────
+  function wire(){
+    const q = sel => [...panel.querySelectorAll(sel)];
+
+    q('[data-check]').forEach(b => b.onclick = async () => {
+      const r = await api('/complete', {task_id: b.dataset.check});
+      if (!r.ok) return alert(r.error || 'could not complete that');
+      log('complete','DASHFLOW','done — ' + (b.closest('.tcard').querySelector('.tc-title').textContent));
+      refresh();
     });
-    const b = await r.json().catch(()=>({}));
-    if (!b.ok) alert(b.error || 'could not add that');
-    else log('send','DASHFLOW', `added — ${title}`);
-    load();
+
+    q('[data-move]').forEach(b => b.onclick = async () => {
+      const t = tasks.find(x => x.id === b.dataset.move);
+      const i = COLS.findIndex(c => c.key === t.status) + (+b.dataset.dir);
+      if (i < 0 || i > 3) return;
+      const r = await api('/update', {task_id: t.id, status: COLS[i].key});
+      if (!r.ok) return alert(r.error || 'could not move that');
+      refresh();
+    });
+
+    // Click the estimate chip to change it — his card edits in place too.
+    q('[data-est]').forEach(el => el.onclick = async () => {
+      const t = tasks.find(x => x.id === el.dataset.est) || calTasks.find(x => x.id === el.dataset.est);
+      const v = prompt('Estimate in minutes', String(t?.estimate_minutes ?? ''));
+      if (v === null) return;
+      const n = parseInt(v, 10);
+      if (isNaN(n)) return;
+      const r = await api('/update', {task_id: el.dataset.est, estimate_minutes: n});
+      if (!r.ok) return alert(r.error || 'could not change the estimate');
+      refresh();
+    });
+
+    q('[data-title]').forEach(el => el.ondblclick = async () => {
+      const v = prompt('Task title', el.textContent);
+      if (!v || v === el.textContent) return;
+      const r = await api('/update', {task_id: el.dataset.title, title: v});
+      if (!r.ok) return alert(r.error || 'could not rename that');
+      refresh();
+    });
+
+    // ⋯ opens subtasks, which is also how "Add subtasks" works in his menu.
+    q('[data-menu]').forEach(b => b.onclick = async () => {
+      const id = b.dataset.menu;
+      if (openSubs[id]) { delete openSubs[id]; render(); return; }
+      const r = await api('/subtasks?task_id=' + encodeURIComponent(id));
+      openSubs[id] = r.ok ? (r.subtasks || []) : [];
+      render();
+    });
+
+    q('[data-sub]').forEach(b => b.onclick = async () => {
+      const row = (openSubs[b.dataset.task] || []).find(x => x.id === b.dataset.sub);
+      const r = await api('/subtask-update', {subtask_id: b.dataset.sub, is_done: !row?.is_done});
+      if (!r.ok) return alert(r.error || 'could not update that');
+      reopen(b.dataset.task);
+    });
+
+    q('[data-subdel]').forEach(b => b.onclick = async () => {
+      await api('/subtask-update', {subtask_id: b.dataset.subdel, delete: true});
+      reopen(b.dataset.task);
+    });
+
+    q('[data-submin]').forEach(el => el.onchange = async () => {
+      const n = parseInt(el.value, 10);
+      await api('/subtask-update', {subtask_id: el.dataset.submin,
+                                    estimate_minutes: isNaN(n) ? null : n});
+      reopen(el.dataset.task);
+    });
+
+    q('[data-subadd]').forEach(el => el.onkeydown = async e => {
+      if (e.key !== 'Enter' || !el.value.trim()) return;
+      const minEl = panel.querySelector(`[data-subaddmin="${el.dataset.subadd}"]`);
+      const n = parseInt(minEl?.value ?? '', 10);
+      const r = await api('/subtask-add', {task_id: el.dataset.subadd, title: el.value.trim(),
+                                           estimate_minutes: isNaN(n) ? null : n});
+      if (!r.ok) return alert(r.error || 'could not add that');
+      el.value = ''; if (minEl) minEl.value = '';
+      reopen(el.dataset.subadd);
+    });
+
+    q('[data-dash]').forEach(b => b.onclick = () => startDash([b.dataset.dash], 'Task'));
+  }
+
+  async function reopen(taskId){
+    const r = await api('/subtasks?task_id=' + encodeURIComponent(taskId));
+    openSubs[taskId] = r.ok ? (r.subtasks || []) : [];
+    await refresh();
+  }
+
+  async function refresh(){
+    await load();
+    if (view === 'calendar') await loadCal();
+  }
+
+  async function startDash(ids, label){
+    if (!ids.length) return;
+    const r = await api('/dash-start', {task_ids: ids, label});
+    if (!r.ok) return alert(r.error || 'could not start the dash');
+    log('run','DASHFLOW', `dash started — ${label} (${ids.length})`);
+  }
+
+  // ── chrome ──────────────────────────────────────────────────────────────
+  document.querySelectorAll('.dfnav').forEach(b => b.onclick = () => {
+    view = b.dataset.view;
+    if (view === 'calendar') loadCal(); else render();
+  });
+  $$('colPrev').onclick = () => { col = (col+3)%4; render(); };
+  $$('colNext').onclick = () => { col = (col+1)%4; render(); };
+  $$('calPrev').onclick = () => { calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth()-1, 1); loadCal(); };
+  $$('calNext').onclick = () => { calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth()+1, 1); loadCal(); };
+
+  $$('dfDashAll').onclick = () => {
+    const pool = (view === 'board' ? tasks.filter(t => t.status === COLS[col].key)
+                                   : tasks.filter(t => t.status === 'today'));
+    startDash(pool.filter(t => !isDone(t)).map(t => t.id),
+              picked.length ? `${picked.length} lists` : 'All lists');
   };
+  $$('colDash').onclick = () => startDash(
+    tasks.filter(t => t.status === COLS[col].key && !isDone(t)).map(t => t.id), COLS[col].label);
+
+  const addTask = async (status, due) => {
+    const title = prompt('New task');
+    if (!title || !title.trim()) return;
+    const r = await api('/add', {title: title.trim(), status,
+                                 list_id: picked.length === 1 ? picked[0] : null,
+                                 due_date: due || null});
+    if (!r.ok) return alert(r.error || 'could not add that');
+    refresh();
+  };
+  $$('dfAddBtn').onclick = () => addTask(view === 'today' ? 'today' : COLS[col].key);
+  $$('calAdd').onclick  = () => addTask('today', calSel);
 
   load();
-  setInterval(load, 30000);
-  window.jarvisToday = { reload: load };
+  setInterval(() => { if (!Object.keys(openSubs).length) refresh(); }, 30000);
+  window.jarvisDashflow = { reload: refresh };
 })();

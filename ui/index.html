@@ -83,28 +83,74 @@
       </div>
     </div>
   </section>
-  <!-- Right: today's list, synced from DashFlow. Takes over the column the
-       Action Log used to occupy, now that the log is a drawer. -->
-  <section class="col right today glass" id="todayPanel">
-    <div class="today-head">
-      <div class="colnav">
-        <button class="navarrow" id="colPrev" title="Previous column">‹</button>
-        <div class="h sm" id="colName">Today</div>
-        <button class="navarrow" id="colNext" title="Next column">›</button>
+  <!-- Right: DashFlow. Board / Today / Calendar — the same three screens the
+       app has, over the same MCP tools JARVIS holds. -->
+  <section class="col right dashflow glass" id="todayPanel">
+
+    <!-- Board + Today share this header; Calendar swaps it out. -->
+    <div class="df-top">
+      <div class="df-brand">
+        <span class="df-name" id="dfViewName">Dash<b>Flow</b></span>
+        <span class="df-sub" id="dfSub"></span>
       </div>
-      <div class="today-meta"><span id="todaySource"></span></div>
+      <div class="df-top-actions">
+        <button class="df-primary" id="dfDashAll">⚡ <span id="dfDashAllLabel">Dash all lists</span></button>
+        <button class="df-ghost" id="dfAddBtn" title="Add a task">+</button>
+      </div>
     </div>
+
+    <div class="df-progress" id="dfProgress" hidden><span id="dfProgressBar"></span></div>
 
     <div class="listpills" id="listPills"></div>
 
-    <div class="today-list" id="todayList">
-      <span class="chip ghost">connecting to DashFlow…</span>
+    <div class="df-body">
+      <!-- Board -->
+      <div class="df-view" id="view-board">
+        <div class="colbar">
+          <button class="navarrow" id="colPrev">‹</button>
+          <div class="colpills" id="colPills"></div>
+          <button class="navarrow" id="colNext">›</button>
+        </div>
+        <div class="colhead2">
+          <span class="colhead-name"><i id="colDot"></i><span id="colName">Backlog</span> <b id="colCount">0</b></span>
+          <span class="colhead-right">
+            <span class="colmins" id="colMins"></span>
+            <button class="df-primary sm" id="colDash">⚡ Dash</button>
+          </span>
+        </div>
+        <div class="cardlist" id="boardCards"></div>
+      </div>
+
+      <!-- Today -->
+      <div class="df-view" id="view-today" hidden>
+        <div class="upnext">Up next</div>
+        <div class="cardlist" id="todayCards"></div>
+      </div>
+
+      <!-- Calendar -->
+      <div class="df-view" id="view-calendar" hidden>
+        <div class="calcard">
+          <div class="calhead">
+            <button class="navarrow" id="calPrev">‹</button>
+            <span class="calmonth" id="calMonth"></span>
+            <button class="navarrow" id="calNext">›</button>
+          </div>
+          <div class="caldow"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div>
+          <div class="calgrid" id="calGrid"></div>
+        </div>
+        <div class="calday">
+          <span id="calDayLabel"></span>
+          <button class="df-primary sm" id="calAdd">+ Add event</button>
+        </div>
+        <div class="cardlist" id="calCards"></div>
+      </div>
     </div>
 
-    <div class="today-foot">
-      <input id="todayAdd" placeholder="Add a task…" spellcheck="false">
-      <span class="today-count" id="todayCount"></span>
-    </div>
+    <nav class="df-nav">
+      <button class="dfnav on" data-view="board"><i>▦</i>Board</button>
+      <button class="dfnav" data-view="today"><i>◷</i>Today</button>
+      <button class="dfnav" data-view="calendar"><i>▤</i>Calendar</button>
+    </nav>
   </section>
 </div>
 
