@@ -83,75 +83,21 @@
       </div>
     </div>
   </section>
-  <!-- Right: DashFlow. Board / Today / Calendar — the same three screens the
-       app has, over the same MCP tools JARVIS holds. -->
-  <section class="col right dashflow glass" id="todayPanel">
-
-    <!-- Board + Today share this header; Calendar swaps it out. -->
-    <div class="df-top">
-      <div class="df-brand">
-        <span class="df-name" id="dfViewName">Dash<b>Flow</b></span>
-        <span class="df-sub" id="dfSub"></span>
-      </div>
-      <div class="df-top-actions">
-        <button class="df-primary" id="dfDashAll">⚡ <span id="dfDashAllLabel">Dash all lists</span></button>
-        <button class="df-ghost" id="dfAddBtn" title="Add a task">+</button>
-      </div>
+  <!-- Right: DashFlow itself, framed.
+       Not a reimplementation. Every reimplementation drifts, and this one was
+       already re-solving problems Casey's code had solved -- status ordering,
+       calendar exclusion, the estimate maths. The app is the app; this panel
+       only decides where it sits. -->
+  <section class="col right dfframe glass" id="todayPanel">
+    <div class="dff-bar">
+      <span class="dff-name">Dash<b>Flow</b></span>
+      <span class="dff-note" id="dffNote"></span>
+      <button class="dff-btn" id="dffReload" title="Reload">⟳</button>
+      <button class="dff-btn" id="dffOpen" title="Open in a full window">⤢</button>
     </div>
-
-    <div class="df-progress" id="dfProgress" hidden><span id="dfProgressBar"></span></div>
-
-    <div class="listpills" id="listPills"></div>
-
-    <div class="df-body">
-      <!-- Board -->
-      <div class="df-view" id="view-board">
-        <div class="colbar">
-          <button class="navarrow" id="colPrev">‹</button>
-          <div class="colpills" id="colPills"></div>
-          <button class="navarrow" id="colNext">›</button>
-        </div>
-        <div class="colhead2">
-          <span class="colhead-name"><i id="colDot"></i><span id="colName">Backlog</span> <b id="colCount">0</b></span>
-          <span class="colhead-right">
-            <span class="colmins" id="colMins"></span>
-            <button class="df-primary sm" id="colDash">⚡ Dash</button>
-          </span>
-        </div>
-        <div class="cardlist" id="boardCards"></div>
-      </div>
-
-      <!-- Today -->
-      <div class="df-view" id="view-today" hidden>
-        <div class="upnext">Up next</div>
-        <div class="cardlist" id="todayCards"></div>
-      </div>
-
-      <!-- Calendar -->
-      <div class="df-view" id="view-calendar" hidden>
-        <div class="calcard">
-          <div class="calhead">
-            <button class="navarrow" id="calPrev">‹</button>
-            <span class="calmonth" id="calMonth"></span>
-            <button class="calmode" id="calMode" title="Switch between week and month">Month</button>
-            <button class="navarrow" id="calNext">›</button>
-          </div>
-          <div class="caldow"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div>
-          <div class="calgrid" id="calGrid"></div>
-        </div>
-        <div class="calday">
-          <span id="calDayLabel"></span>
-          <button class="df-primary sm" id="calAdd">+ Add event</button>
-        </div>
-        <div class="cardlist" id="calCards"></div>
-      </div>
-    </div>
-
-    <nav class="df-nav">
-      <button class="dfnav on" data-view="board"><i>▦</i>Board</button>
-      <button class="dfnav" data-view="today"><i>◷</i>Today</button>
-      <button class="dfnav" data-view="calendar"><i>▤</i>Calendar</button>
-    </nav>
+    <iframe id="dffFrame" src="https://app.get-dashflow.com/board"
+            referrerpolicy="no-referrer-when-downgrade"
+            allow="clipboard-read; clipboard-write"></iframe>
   </section>
 </div>
 
