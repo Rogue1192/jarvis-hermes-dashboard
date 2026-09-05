@@ -292,3 +292,57 @@ body.drawer-open .drawer-scrim{opacity:1;pointer-events:auto}
 .dff-btn{cursor:pointer;flex:0 0 auto;border:1px solid var(--edge);border-radius:9px;background:rgba(5,18,28,.7);color:var(--mut);font-size:12px;line-height:1;padding:5px 9px;transition:.16s}
 .dff-btn:hover{color:var(--cyan);border-color:var(--edge-2)}
 #dffFrame{flex:1;min-height:0;width:100%;border:0;background:#0a0a0a}
+
+/* ── Full-height DashFlow rail ─────────────────────────────────────────────
+   The app wants vertical room, and squeezed into the top band it showed a
+   header and one card. It runs floor to ceiling down the right instead, and
+   everything else stops short of it. */
+:root{ --rail-w: 600px; --rail-gap: 16px; }
+.dfframe{position:fixed;top:96px;right:16px;bottom:10px;width:var(--rail-w);z-index:4}
+.hud{padding-right:calc(var(--rail-w) + var(--rail-gap) + 16px)}
+.board{right:calc(var(--rail-w) + var(--rail-gap) + 16px)}
+
+/* The status pills carry three facts that never change while it is running,
+   so they get the smallest space that still lets you check them. */
+.pills{gap:6px}
+.pill{height:26px;border-radius:13px;padding:0 10px;font-size:10px;gap:6px}
+.pill i{width:7px;height:7px}
+.pill span{max-width:150px}
+
+@media (max-width:1600px){ :root{ --rail-w: 520px; } }
+@media (max-width:1320px){ :root{ --rail-w: 440px; } .pill span{max-width:90px} }
+
+/* ── Mission board cards: accordion ────────────────────────────────────────
+   The face carries the title and nothing else worth crowding it with. The
+   detail opens underneath it in place, so you can read what a card is without
+   losing the column, and Review inside it is still what opens the preview and
+   the verdict buttons. */
+.card{padding:0}
+.cface{cursor:pointer;padding:9px 26px 9px 10px;position:relative}
+.cchev{position:absolute;top:12px;right:10px;width:6px;height:6px;border-right:1.5px solid var(--dim);border-bottom:1.5px solid var(--dim);transform:rotate(45deg);transition:.18s}
+.card.open .cchev{transform:rotate(-135deg);border-color:var(--cyan)}
+.card.open{border-color:var(--edge-2);background:rgba(8,26,38,.92)}
+.cd{display:none;padding:2px 10px 10px;border-top:1px solid rgba(64,243,255,.12);margin-top:1px}
+.card.open .cd{display:block;animation:cdin .16s ease-out}
+@keyframes cdin{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+.cd-body{margin:9px 0 0;font-size:11.5px;line-height:1.55;color:var(--mut)}
+.cd-body.dim{color:var(--faint)}
+.cd-result{margin:8px 0 0;font-size:11px;line-height:1.5;color:var(--cyan2)}
+.cd-result b{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-right:6px}
+.cd-facts{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:10px 0 0;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase}
+.cd-facts dt{color:var(--dim)}
+.cd-facts dd{margin:0;color:var(--mut)}
+.cd-act{margin-top:11px;display:flex;align-items:center;gap:9px}
+.cd-act .ctl{padding:6px 12px;font-size:9px}
+.cd-act .nope{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--amber)}
+.bcol[data-status="needs_approval"] .cd-act .ctl{color:var(--amber);border-color:rgba(255,182,72,.4)}
+/* Sample cards read a shade quieter so they are never mistaken for real work. */
+.board-cols.sample .card{border-style:dashed}
+
+/* Status pills: a small pile beside the wordmark, not a banner across the top.
+   They earn a glance when one goes amber and no attention otherwise. */
+.pills{flex:0 1 auto;justify-content:flex-start;flex-wrap:wrap;gap:5px;max-width:430px;margin-left:4px;align-content:center}
+.pill{height:22px;border-radius:11px;padding:0 9px;font-size:9.5px;gap:5px;font-family:var(--mono);letter-spacing:.06em}
+.pill i{width:6px;height:6px}
+.pill span{max-width:132px}
+@media (max-width:1320px){.pill span{max-width:84px}}

@@ -937,6 +937,35 @@ setInterval(async () => {
     bad.onclick = () => decide(card.id, 'reject', note());
   }
 
+  /* A card face has room for a title and not much else. Everything else the
+     agent knows about the job -- what it actually is, what it produced, what
+     is attached -- lives one click down, in the accordion. Opening a card
+     tells you what it is; the Review button is still what opens the preview
+     and the verdict buttons, because signing something off should stay a
+     deliberate second step. */
+  function detailHtml(c){
+    const rows = [];
+    if (c.body)   rows.push(`<p class="cd-body">${esc(c.body)}</p>`);
+    if (c.result) rows.push(`<p class="cd-result"><b>Result</b> ${esc(c.result)}</p>`);
+    const facts = [];
+    if (c.agent)    facts.push(['Agent', c.agent]);
+    if (c.client)   facts.push(['Client', c.client]);
+    if (c.priority) facts.push(['Priority', c.priority]);
+    if (c.attachments) facts.push(['Attached', c.attachments + ' file' + (c.attachments === 1 ? '' : 's')]);
+    if (facts.length)
+      rows.push('<dl class="cd-facts">' + facts.map(([k, v]) =>
+        `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join('') + '</dl>');
+    const k = c.preview && c.preview.kind;
+    const verdictCol = c.status === 'needs_approval' || c.status === 'final_review';
+    rows.push('<div class="cd-act">'
+      + `<button class="ctl aux cd-open" data-open="${esc(c.id)}">`
+      + (verdictCol ? 'Review' : 'Open') + '</button>'
+      + (k === 'none' ? '<span class="nope">nothing to view yet</span>' : '')
+      + '</div>');
+    if (!rows.length) rows.push('<p class="cd-body dim">No detail on this one yet.</p>');
+    return `<div class="cd">${rows.join('')}</div>`;
+  }
+
   function cardHtml(c, pickable){
     const meta = [];
     if (c.agent)  meta.push(`<span class="kind">${esc(c.agent)}</span>`);
@@ -949,9 +978,56 @@ setInterval(async () => {
     const title = pickable
       ? `<div class="pick"><input type="checkbox" class="cpick" data-id="${esc(c.id)}"><div class="ct">${esc(c.title)}</div></div>`
       : `<div class="ct">${esc(c.title)}</div>`;
-    return `<div class="card" data-id="${esc(c.id)}">${title}`
-         + (meta.length ? `<div class="cm">${meta.join('')}</div>` : '') + `</div>`;
+    return `<div class="card" data-id="${esc(c.id)}">`
+         + `<div class="cface">${title}`
+         + (meta.length ? `<div class="cm">${meta.join('')}</div>` : '')
+         + `<i class="cchev"></i></div>`
+         + detailHtml(c)
+         + `</div>`;
   }
+
+  /* Sample cards, shown only when the real board has nothing in it at all.
+     An empty board tells you nothing about whether the layout works, and the
+     moment Hermes files a real task these disappear on their own. */
+  const SAMPLES = {
+    todo: [
+      {id:'s1', title:'Castle Fence Company — October offer refresh', client:'Castle Fence', agent:'copy',
+       priority:'normal', status:'todo', attachments:0, preview:{kind:'none'},
+       body:'Rewrite the three top offers for the fall push. Keep the financing angle, drop the spring language.'},
+      {id:'s2', title:'Tree service audience stack — Cedar Park service area', client:'Hill Country Tree', agent:'audience',
+       priority:'low', status:'todo', attachments:0, preview:{kind:'none'},
+       body:'Build the stacked interest pool against the 11-zip service area. Flag if it lands under 200k.'}
+    ],
+    in_process: [
+      {id:'s3', title:'Facebook ads — Castle Fence Company video creative production', client:'Castle Fence', agent:'creative',
+       priority:'high', status:'in_process', attachments:2, preview:{kind:'none'},
+       body:'Three 15-second cuts from the Leander install footage: hook on the finished gate, price framing in the middle, call to action over the drone pull-back. Vertical 9:16 for Reels, square backup for feed.'}
+    ],
+    needs_approval: [
+      {id:'s4', title:'Castle Fence — cedar privacy fence carousel', client:'Castle Fence', agent:'creative',
+       priority:'high', status:'needs_approval', attachments:3, preview:{kind:'image'},
+       body:'Five-frame carousel, before/after on the Georgetown job. Headline reads "Cedar privacy, installed in a day."',
+       result:'3 frames rendered, 2 pending colour pass'},
+      {id:'s5', title:'Roofing landing page — storm damage variant', client:'Summit Roofing', agent:'web',
+       priority:'normal', status:'needs_approval', attachments:1, preview:{kind:'url'},
+       body:'Standalone page for the hail campaign. Form above the fold, inspection offer, no navigation.',
+       result:'Staged and ready to look at'}
+    ],
+    final_review: [
+      {id:'s6', title:'Bathroom remodel — GC audience test read', client:'Odom Remodel', agent:'audience',
+       priority:'normal', status:'final_review', attachments:0, preview:{kind:'none'},
+       body:'Stacked homeowner + remodel intent signals in one flexible group. Delivery estimate came back 340k against the service area.',
+       result:'340,000 reachable — clears the 200k floor'}
+    ],
+    complete: [
+      {id:'s7', title:'Castle Fence — September lead form rewrite', client:'Castle Fence', agent:'copy',
+       priority:'normal', status:'complete', attachments:1, preview:{kind:'image'},
+       body:'Shorter form, three fields, qualifying question on fence length.', result:'Approved and live'},
+      {id:'s8', title:'Summit Roofing — Reels cutdowns batch 4', client:'Summit Roofing', agent:'creative',
+       priority:'low', status:'complete', attachments:4, preview:{kind:'video'},
+       body:'Four cutdowns from the September shoot.', result:'Approved and live'}
+    ]
+  };
 
   let cache = {};
   async function load(){
@@ -962,21 +1038,19 @@ setInterval(async () => {
       src.textContent = '';
       cache = {};
       let total = 0;
+      for (const col of cols) total += (b.columns[col] || []).length;
+      const sample = total === 0;
+      const columns = sample ? SAMPLES : b.columns;
       for (const col of cols){
-        const items = b.columns[col] || [];
+        const items = columns[col] || [];
         items.forEach(c => cache[c.id] = c);
-        total += items.length;
         document.getElementById('col-' + col).innerHTML =
           items.map(c => cardHtml(c, col === 'complete')).join('');
         document.getElementById('c-' + col).textContent = items.length;
       }
-      document.querySelectorAll('.bcol-body .card').forEach(el => {
-        el.onclick = e => {
-          // The checkbox is for selecting, not for opening. Let it be itself.
-          if (e.target.classList.contains('cpick')) return;
-          const c = cache[el.dataset.id]; if (c) openCard(c);
-        };
-      });
+      document.getElementById('boardCols').classList.toggle('sample', sample);
+      if (sample) src.textContent = 'sample cards — the board is empty';
+      wireCards();
       wirePicks();
       const n = b.archived || 0;
       archCount.textContent = n ? `(${n})` : '';
@@ -1006,6 +1080,27 @@ setInterval(async () => {
     selAll.checked = boxes.length > 0 && on.length === boxes.length;
     boxes.forEach(b => b.closest('.card').classList.toggle('picked', b.checked));
   }
+  /* Click the face to open the card, click Review inside it to open the
+     preview. The checkbox is for selecting and stays out of both. */
+  function wireCards(){
+    document.querySelectorAll('.bcol-body .card').forEach(el => {
+      const face = el.querySelector('.cface');
+      face.onclick = e => {
+        if (e.target.classList.contains('cpick')) return;
+        const wasOpen = el.classList.contains('open');
+        el.closest('.bcol-body').querySelectorAll('.card.open')
+          .forEach(o => o.classList.remove('open'));
+        if (!wasOpen) el.classList.add('open');
+      };
+    });
+    document.querySelectorAll('.bcol-body [data-open]').forEach(btn => {
+      btn.onclick = e => {
+        e.stopPropagation();
+        const c = cache[btn.dataset.open]; if (c) openCard(c);
+      };
+    });
+  }
+
   function wirePicks(){
     document.querySelectorAll('#col-complete .cpick').forEach(b => {
       b.onchange = syncPickUi;

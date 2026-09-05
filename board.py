@@ -180,6 +180,12 @@ def snapshot():
             attachments=len(atts),
             preview=_preview_for(r, atts),
             created_at=r["created_at"],
+            # The card face only has room for a title. The accordion needs
+            # something to open on to, so the body and whatever the agent
+            # left behind as a result come along.
+            body=(r["body"] or None),
+            result=(r["result"] or None),
+            skills=skills,
         )
         out[col].append(card)
     archived = con.execute(

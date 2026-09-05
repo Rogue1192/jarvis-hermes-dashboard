@@ -83,23 +83,24 @@
       </div>
     </div>
   </section>
-  <!-- Right: DashFlow itself, framed.
-       Not a reimplementation. Every reimplementation drifts, and this one was
-       already re-solving problems Casey's code had solved -- status ordering,
-       calendar exclusion, the estimate maths. The app is the app; this panel
-       only decides where it sits. -->
-  <section class="col right dfframe glass" id="todayPanel">
-    <div class="dff-bar">
-      <span class="dff-name">Dash<b>Flow</b></span>
-      <span class="dff-note" id="dffNote"></span>
-      <button class="dff-btn" id="dffReload" title="Reload">⟳</button>
-      <button class="dff-btn" id="dffOpen" title="Open in a full window">⤢</button>
-    </div>
-    <iframe id="dffFrame" src="https://app.get-dashflow.com/board"
-            referrerpolicy="no-referrer-when-downgrade"
-            allow="clipboard-read; clipboard-write"></iframe>
-  </section>
 </div>
+
+<!-- Right: DashFlow itself, framed.
+     Not a reimplementation. Every reimplementation drifts, and this one was
+     already re-solving problems Casey's code had solved -- status ordering,
+     calendar exclusion, the estimate maths. The app is the app; this panel
+     only decides where it sits. -->
+<section class="col right dfframe glass" id="todayPanel">
+  <div class="dff-bar">
+    <span class="dff-name">Dash<b>Flow</b></span>
+    <span class="dff-note" id="dffNote"></span>
+    <button class="dff-btn" id="dffReload" title="Reload">⟳</button>
+    <button class="dff-btn" id="dffOpen" title="Open in a full window">⤢</button>
+  </div>
+  <iframe id="dffFrame" src="https://app.get-dashflow.com/board"
+          referrerpolicy="no-referrer-when-downgrade"
+          allow="clipboard-read; clipboard-write"></iframe>
+</section>
 
 <!-- The board. Five columns, full width. -->
 <section class="board glass" id="boardPanel">
